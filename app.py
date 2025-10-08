@@ -25,6 +25,7 @@ st.set_page_config(
 )
 
 # CSS Personalizzato con i colori del logo
+# CSS Personalizzato con i colori del logo + DARK MODE SUPPORT
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700;800;900&display=swap');
@@ -42,9 +43,152 @@ st.markdown("""
         --white: #FFFFFF;
     }
     
-    /* Sfondo principale */
-    .stApp {
+    /* ========== DARK MODE SUPPORT ========== */
+    [data-testid="stAppViewContainer"] {
         background-color: var(--white);
+    }
+    
+    /* Dark mode override */
+    @media (prefers-color-scheme: dark) {
+        [data-testid="stAppViewContainer"] {
+            background-color: #1E1E1E !important;
+        }
+    }
+    
+    /* Force light background in main content */
+    .main .block-container {
+        background-color: var(--white);
+        padding: 2rem;
+        border-radius: 16px;
+    }
+    
+    /* Dark mode text colors */
+    @media (prefers-color-scheme: dark) {
+        .main .block-container {
+            background-color: #2D2D2D !important;
+            color: #FFFFFF !important;
+        }
+        
+        /* Step container dark mode */
+        .step-container {
+            background-color: #2D2D2D !important;
+            border: 2px solid #E52217 !important;
+            color: #FFFFFF !important;
+        }
+        
+        .step-title {
+            color: #FFFFFF !important;
+        }
+        
+        /* Info card dark */
+        .info-card {
+            background-color: #3A3A3A !important;
+            color: #FFFFFF !important;
+        }
+        
+        /* Product preview dark */
+        .product-preview {
+            background: linear-gradient(135deg, #2D2D2D 0%, #3A3A3A 100%) !important;
+            border: 3px solid var(--primary-red) !important;
+        }
+        
+        .product-title-preview {
+            color: #FFFFFF !important;
+        }
+        
+        .product-meta {
+            background-color: #3A3A3A !important;
+        }
+        
+        .product-field-label {
+            color: #CCCCCC !important;
+        }
+        
+        .product-field-content {
+            color: #FFFFFF !important;
+        }
+        
+        /* Input fields dark */
+        .stTextInput > div > div > input,
+        .stTextArea > div > div > textarea,
+        .stSelectbox > div > div > select {
+            background-color: #3A3A3A !important;
+            color: #FFFFFF !important;
+            border: 2px solid #555555 !important;
+        }
+        
+        .stTextInput > div > div > input::placeholder,
+        .stTextArea > div > div > textarea::placeholder {
+            color: #888888 !important;
+        }
+        
+        /* Labels dark */
+        label, .stMarkdown p, .stMarkdown li {
+            color: #FFFFFF !important;
+        }
+        
+        /* Dataframe dark */
+        [data-testid="stDataFrame"] {
+            background-color: #2D2D2D !important;
+        }
+        
+        /* Expander dark */
+        .streamlit-expanderHeader {
+            background-color: #3A3A3A !important;
+            color: #FFFFFF !important;
+        }
+        
+        /* File uploader dark */
+        [data-testid="stFileUploader"] {
+            background-color: #3A3A3A !important;
+            border: 2px dashed #E52217 !important;
+        }
+        
+        /* Checkbox dark */
+        .stCheckbox label {
+            color: #FFFFFF !important;
+        }
+        
+        /* Metric cards - keep red */
+        .metric-card {
+            background: linear-gradient(135deg, var(--primary-red) 0%, #c91d13 100%) !important;
+            color: var(--white) !important;
+        }
+        
+        /* Progress container dark */
+        .progress-container {
+            background-color: #3A3A3A !important;
+        }
+        
+        /* Code blocks dark */
+        code {
+            background-color: #3A3A3A !important;
+            color: #FFFFFF !important;
+        }
+        
+        /* Tabs dark */
+        .stTabs [data-baseweb="tab-list"] {
+            background-color: #2D2D2D !important;
+        }
+        
+        .stTabs [data-baseweb="tab"] {
+            color: #FFFFFF !important;
+        }
+        
+        /* Multiselect dark */
+        .stMultiSelect [data-baseweb="select"] {
+            background-color: #3A3A3A !important;
+        }
+        
+        .stMultiSelect [data-baseweb="tag"] {
+            background-color: #E52217 !important;
+            color: #FFFFFF !important;
+        }
+        
+        /* Slider dark */
+        .stSlider [data-testid="stTickBar"] {
+            background-color: #3A3A3A !important;
+        }
     }
     
     /* Header */
@@ -301,6 +445,17 @@ st.markdown("""
     
     ::-webkit-scrollbar-thumb:hover {
         background: #c91d13;
+    }
+    
+    /* File uploader styling */
+    [data-testid="stFileUploader"] {
+        border: 2px dashed var(--light-pink);
+        border-radius: 12px;
+        padding: 1rem;
+    }
+    
+    [data-testid="stFileUploader"]:hover {
+        border-color: var(--primary-red);
     }
 </style>
 """, unsafe_allow_html=True)

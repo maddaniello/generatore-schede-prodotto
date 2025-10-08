@@ -19,7 +19,7 @@ import urllib.request
 # Configurazione pagina
 st.set_page_config(
     page_title="Moca - Generatore Schede Prodotto",
-    page_icon="🔴",
+    page_icon="https://mocainteractive.com/wp-content/uploads/2025/04/cropped-moca-instagram-icona-1-192x192.png",
     layout="wide",
     initial_sidebar_state="collapsed"
 )

@@ -462,6 +462,82 @@ st.markdown("""
 
 # Classe ProductCardGenerator (identica a prima)
 class ProductCardGenerator:
+    def deduplicate_products(csv_data: pd.DataFrame, code_column: str) -> Tuple[pd.DataFrame, Dict]:
+    """
+    Deduplica i prodotti in base al codice prodotto.
+    Restituisce:
+    - DataFrame con prodotti unici da elaborare
+    - Dizionario di mappatura {indice_originale: codice_prodotto}
+    """
+    if not code_column or code_column not in csv_data.columns:
+        return csv_data, {}
+    
+    # Normalizza i codici prodotto
+    csv_data['_normalized_code'] = csv_data[code_column].apply(
+        lambda x: str(x).strip().strip("'").strip('"')
+    )
+    
+    # Trova prodotti unici (prima occorrenza di ogni codice)
+    unique_products = csv_data.drop_duplicates(subset='_normalized_code', keep='first')
+    
+    # Crea mappatura: indice_originale -> codice_prodotto
+    code_mapping = {}
+    for idx, row in csv_data.iterrows():
+        code_mapping[idx] = row['_normalized_code']
+    
+    # Statistiche deduplicazione
+    total_products = len(csv_data)
+    unique_count = len(unique_products)
+    duplicates = total_products - unique_count
+    
+    if duplicates > 0:
+        st.info(f"""
+        🔄 **Deduplicazione Intelligente Attivata**
+        - Prodotti totali nel CSV: **{total_products}**
+        - Prodotti unici da elaborare: **{unique_count}**
+        - Duplicati rilevati: **{duplicates}** (verranno riutilizzati i contenuti)
+        - Risparmio stimato: **~{(duplicates / total_products * 100):.1f}%** di risorse AI
+        """)
+    
+    return unique_products.drop(columns=['_normalized_code']), code_mapping
+
+def expand_results_to_original(results: List[Dict], code_mapping: Dict, 
+                               csv_data: pd.DataFrame, code_column: str) -> List[Dict]:
+    """
+    Espande i risultati per coprire tutte le righe originali del CSV,
+    duplicando i contenuti generati per prodotti con stesso SKU.
+    """
+    # Crea dizionario: codice_prodotto -> risultato generato
+    results_by_code = {}
+    for result in results:
+        code = result.get('codice_prodotto', '')
+        results_by_code[code] = result
+    
+    # Espandi i risultati per tutte le righe originali
+    expanded_results = []
+    
+    for idx in csv_data.index:
+        original_code = str(csv_data.loc[idx, code_column]).strip().strip("'").strip('"')
+        
+        if original_code in results_by_code:
+            # Copia il risultato generato
+            expanded_result = results_by_code[original_code].copy()
+            
+            # Aggiungi eventuali dati specifici della riga (come taglia, colore, ecc.)
+            # Questo permette di mantenere le varianti nel CSV finale
+            for col in csv_data.columns:
+                if col not in expanded_result and col != code_column:
+                    expanded_result[f'original_{col}'] = csv_data.loc[idx, col]
+            
+            expanded_results.append(expanded_result)
+        else:
+            # Prodotto non generato (errore)
+            expanded_results.append({
+                'codice_prodotto': original_code,
+                'errore': 'ERRORE - NON GENERATO'
+            })
+    
+    return expanded_results
     def __init__(self):
         self.openai_client = None
         self.anthropic_client = None
@@ -1185,6 +1261,13 @@ def initialize_session_state():
         st.session_state.generator = ProductCardGenerator()
     if 'preview_index' not in st.session_state:
         st.session_state.preview_index = 0
+    # NUOVI per deduplicazione
+    if 'unique_products' not in st.session_state:
+        st.session_state.unique_products = None
+    if 'code_mapping' not in st.session_state:
+        st.session_state.code_mapping = {}
+    if 'original_csv_data' not in st.session_state:
+        st.session_state.original_csv_data = None
 
 def process_batch(generator, batch_data, site_info, column_mapping, additional_instructions, 
                  code_column, start_index, fields_to_generate, ean_column, use_image_analysis):
@@ -1686,109 +1769,141 @@ def main():
                 st.warning("⚠️ Compila tutti i campi obbligatori")
     
     # STEP 5: Generazione
-    elif st.session_state.current_step == 5:
-        st.markdown('<div class="step-container">', unsafe_allow_html=True)
-        st.markdown('''
-        <div class="step-header">
-            <div class="step-number">5</div>
-            <h2 class="step-title">Generazione Schede Prodotto</h2>
-        </div>
-        ''', unsafe_allow_html=True)
+# STEP 5: Generazione
+elif st.session_state.current_step == 5:
+    st.markdown('<div class="step-container">', unsafe_allow_html=True)
+    st.markdown('''
+    <div class="step-header">
+        <div class="step-number">5</div>
+        <h2 class="step-title">Generazione Schede Prodotto</h2>
+    </div>
+    ''', unsafe_allow_html=True)
+    
+    if st.session_state.processing_status == 'idle':
+        st.markdown("### 🎯 Pronto per generare le schede prodotto!")
         
-        if st.session_state.processing_status == 'idle':
-            st.markdown("### 🎯 Pronto per generare le schede prodotto!")
-            
-            # Riepilogo configurazione
-            st.markdown('<div class="info-card">', unsafe_allow_html=True)
-            st.markdown(f"""
-            **📊 Riepilogo Configurazione:**
-            - 🛍️ Prodotti da elaborare: **{len(st.session_state.csv_data)}**
-            - 📝 Campi da generare: **{len(st.session_state.fields_to_generate)}**
-            - 🤖 AI Provider: **{generator.ai_provider}**
-            - 🔍 Ricerca EAN: **{'✅ Attiva' if st.session_state.serper_configured else '❌ Non attiva'}**
-            - 🖼️ Analisi Immagini: **{'✅ Attiva' if st.session_state.use_image_analysis else '❌ Non attiva'}**
-            - ⚙️ Batch size: **{st.session_state.batch_size}**
-            """)
+        # DEDUPLICAZIONE: Trova prodotti unici
+        code_column = None
+        for csv_col, var_name in st.session_state.column_mapping.items():
+            if any(keyword in var_name.lower() for keyword in ['codice', 'code', 'id', 'sku']):
+                code_column = csv_col
+                break
+        
+        if code_column:
+            unique_products, code_mapping = deduplicate_products(st.session_state.csv_data, code_column)
+            st.session_state.unique_products = unique_products
+            st.session_state.code_mapping = code_mapping
+            st.session_state.original_csv_data = st.session_state.csv_data.copy()
+        else:
+            st.session_state.unique_products = st.session_state.csv_data
+            st.session_state.code_mapping = {}
+        
+        # Riepilogo configurazione
+        st.markdown('<div class="info-card">', unsafe_allow_html=True)
+        st.markdown(f"""
+        **📊 Riepilogo Configurazione:**
+        - 🛍️ Righe totali nel CSV: **{len(st.session_state.csv_data)}**
+        - 🎯 Prodotti unici da elaborare: **{len(st.session_state.unique_products)}**
+        - 📝 Campi da generare: **{len(st.session_state.fields_to_generate)}**
+        - 🤖 AI Provider: **{generator.ai_provider}**
+        - 🔍 Ricerca EAN: **{'✅ Attiva' if st.session_state.serper_configured else '❌ Non attiva'}**
+        - 🖼️ Analisi Immagini: **{'✅ Attiva' if st.session_state.use_image_analysis else '❌ Non attiva'}**
+        - ⚙️ Batch size: **{st.session_state.batch_size}**
+        """)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("⬅️ Indietro", use_container_width=True):
+                st.session_state.current_step = 4
+                st.rerun()
+        with col2:
+            if st.button("🚀 Avvia Generazione", type="primary", use_container_width=True):
+                st.session_state.processing_status = 'processing'
+                st.session_state.total_products = len(st.session_state.unique_products)
+                st.session_state.current_index = 0
+                st.session_state.results = []
+                st.rerun()
+    
+    elif st.session_state.processing_status == 'processing':
+        st.markdown("### ⚡ Elaborazione in corso...")
+        
+        # Progress metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-value">{st.session_state.current_index}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="metric-label">Prodotti Elaborati</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("⬅️ Indietro", use_container_width=True):
-                    st.session_state.current_step = 4
-                    st.rerun()
-            with col2:
-                if st.button("🚀 Avvia Generazione", type="primary", use_container_width=True):
-                    st.session_state.processing_status = 'processing'
-                    st.session_state.total_products = len(st.session_state.csv_data)
-                    st.session_state.current_index = 0
-                    st.session_state.results = []
-                    st.rerun()
         
-        elif st.session_state.processing_status == 'processing':
-            st.markdown("### ⚡ Elaborazione in corso...")
+        with col2:
+            progress_pct = (st.session_state.current_index / st.session_state.total_products * 100) if st.session_state.total_products > 0 else 0
+            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-value">{progress_pct:.1f}%</div>', unsafe_allow_html=True)
+            st.markdown('<div class="metric-label">Completamento</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        with col3:
+            remaining = st.session_state.total_products - st.session_state.current_index
+            st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-value">{remaining}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="metric-label">Rimanenti</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.progress(st.session_state.current_index / st.session_state.total_products if st.session_state.total_products > 0 else 0)
+        
+        # Trova colonna codice
+        code_column = None
+        for csv_col, var_name in st.session_state.column_mapping.items():
+            if any(keyword in var_name.lower() for keyword in ['codice', 'code', 'id']):
+                code_column = csv_col
+                break
+        
+        # Elabora batch SUI PRODOTTI UNICI
+        start_idx = st.session_state.current_index
+        end_idx = min(start_idx + st.session_state.batch_size, len(st.session_state.unique_products))
+        
+        if start_idx < len(st.session_state.unique_products):
+            batch_data = st.session_state.unique_products.iloc[start_idx:end_idx]
             
-            # Progress metrics
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.markdown(f'<div class="metric-value">{st.session_state.current_index}</div>', unsafe_allow_html=True)
-                st.markdown('<div class="metric-label">Prodotti Elaborati</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with col2:
-                progress_pct = (st.session_state.current_index / st.session_state.total_products * 100) if st.session_state.total_products > 0 else 0
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.markdown(f'<div class="metric-value">{progress_pct:.1f}%</div>', unsafe_allow_html=True)
-                st.markdown('<div class="metric-label">Completamento</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with col3:
-                remaining = st.session_state.total_products - st.session_state.current_index
-                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.markdown(f'<div class="metric-value">{remaining}</div>', unsafe_allow_html=True)
-                st.markdown('<div class="metric-label">Rimanenti</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            st.progress(st.session_state.current_index / st.session_state.total_products if st.session_state.total_products > 0 else 0)
-            
-            # Trova colonna codice
-            code_column = None
-            for csv_col, var_name in st.session_state.column_mapping.items():
-                if any(keyword in var_name.lower() for keyword in ['codice', 'code', 'id']):
-                    code_column = csv_col
-                    break
-            
-            # Elabora batch
-            start_idx = st.session_state.current_index
-            end_idx = min(start_idx + st.session_state.batch_size, len(st.session_state.csv_data))
-            
-            if start_idx < len(st.session_state.csv_data):
-                batch_data = st.session_state.csv_data.iloc[start_idx:end_idx]
+            with st.spinner(f"Elaborando prodotti unici {start_idx+1}-{end_idx}..."):
+                batch_results = process_batch(
+                    generator, batch_data, st.session_state.site_info, 
+                    st.session_state.column_mapping,
+                    st.session_state.additional_instructions, code_column, start_idx,
+                    st.session_state.fields_to_generate, 
+                    st.session_state.get('ean_column', None) if st.session_state.serper_configured else None,
+                    st.session_state.use_image_analysis
+                )
                 
-                with st.spinner(f"Elaborando prodotti {start_idx+1}-{end_idx}..."):
-                    batch_results = process_batch(
-                        generator, batch_data, st.session_state.site_info, 
-                        st.session_state.column_mapping,
-                        st.session_state.additional_instructions, code_column, start_idx,
-                        st.session_state.fields_to_generate, 
-                        st.session_state.get('ean_column', None) if st.session_state.serper_configured else None,
-                        st.session_state.use_image_analysis
-                    )
-                    
-                    st.session_state.results.extend(batch_results)
-                    st.session_state.current_index = end_idx
-                
-                if st.session_state.current_index < len(st.session_state.csv_data):
-                    time.sleep(st.session_state.delay_between_batches)
-                    st.rerun()
-                else:
-                    st.session_state.processing_status = 'completed'
-                    st.session_state.current_step = 6
-                    st.rerun()
+                st.session_state.results.extend(batch_results)
+                st.session_state.current_index = end_idx
             
-            st.markdown("</div>", unsafe_allow_html=True)
+            if st.session_state.current_index < len(st.session_state.unique_products):
+                time.sleep(st.session_state.delay_between_batches)
+                st.rerun()
+            else:
+                # ESPANSIONE: Duplica i risultati per tutte le righe originali
+                st.markdown("### 🔄 Espansione risultati a tutte le righe...")
+                
+                if st.session_state.code_mapping:
+                    with st.spinner("Applicando i contenuti generati a tutte le varianti..."):
+                        expanded_results = expand_results_to_original(
+                            st.session_state.results,
+                            st.session_state.code_mapping,
+                            st.session_state.original_csv_data,
+                            code_column
+                        )
+                        st.session_state.results = expanded_results
+                        st.success(f"✅ Risultati espansi a {len(expanded_results)} righe totali!")
+                
+                st.session_state.processing_status = 'completed'
+                st.session_state.current_step = 6
+                st.rerun()
+        
+        st.markdown("</div>", unsafe_allow_html=True)
     
     # STEP 6: Risultati
     elif st.session_state.current_step == 6:

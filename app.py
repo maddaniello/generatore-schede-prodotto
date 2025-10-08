@@ -606,43 +606,43 @@ class ProductCardGenerator:
             return urls  # Fallback: restituisci tutti gli URL
     
     def deduplicate_products(csv_data: pd.DataFrame, code_column: str) -> Tuple[pd.DataFrame, Dict]:
-    """
-    Deduplica i prodotti in base al codice prodotto.
-    Restituisce:
-    - DataFrame con prodotti unici da elaborare
-    - Dizionario di mappatura {indice_originale: codice_prodotto}
-    """
-    if not code_column or code_column not in csv_data.columns:
-        return csv_data, {}
-    
-    # Normalizza i codici prodotto
-    csv_data['_normalized_code'] = csv_data[code_column].apply(
-        lambda x: str(x).strip().strip("'").strip('"')
-    )
-    
-    # Trova prodotti unici (prima occorrenza di ogni codice)
-    unique_products = csv_data.drop_duplicates(subset='_normalized_code', keep='first')
-    
-    # Crea mappatura: indice_originale -> codice_prodotto
-    code_mapping = {}
-    for idx, row in csv_data.iterrows():
-        code_mapping[idx] = row['_normalized_code']
-    
-    # Statistiche deduplicazione
-    total_products = len(csv_data)
-    unique_count = len(unique_products)
-    duplicates = total_products - unique_count
-    
-    if duplicates > 0:
-        st.info(f"""
-        🔄 **Deduplicazione Intelligente Attivata**
-        - Prodotti totali nel CSV: **{total_products}**
-        - Prodotti unici da elaborare: **{unique_count}**
-        - Duplicati rilevati: **{duplicates}** (verranno riutilizzati i contenuti)
-        - Risparmio stimato: **~{(duplicates / total_products * 100):.1f}%** di risorse AI
-        """)
-    
-    return unique_products.drop(columns=['_normalized_code']), code_mapping
+        """
+        Deduplica i prodotti in base al codice prodotto.
+        Restituisce:
+        - DataFrame con prodotti unici da elaborare
+        - Dizionario di mappatura {indice_originale: codice_prodotto}
+        """
+        if not code_column or code_column not in csv_data.columns:
+            return csv_data, {}
+        
+        # Normalizza i codici prodotto
+        csv_data['_normalized_code'] = csv_data[code_column].apply(
+            lambda x: str(x).strip().strip("'").strip('"')
+        )
+        
+        # Trova prodotti unici (prima occorrenza di ogni codice)
+        unique_products = csv_data.drop_duplicates(subset='_normalized_code', keep='first')
+        
+        # Crea mappatura: indice_originale -> codice_prodotto
+        code_mapping = {}
+        for idx, row in csv_data.iterrows():
+            code_mapping[idx] = row['_normalized_code']
+        
+        # Statistiche deduplicazione
+        total_products = len(csv_data)
+        unique_count = len(unique_products)
+        duplicates = total_products - unique_count
+        
+        if duplicates > 0:
+            st.info(f"""
+            🔄 **Deduplicazione Intelligente Attivata**
+            - Prodotti totali nel CSV: **{total_products}**
+            - Prodotti unici da elaborare: **{unique_count}**
+            - Duplicati rilevati: **{duplicates}** (verranno riutilizzati i contenuti)
+            - Risparmio stimato: **~{(duplicates / total_products * 100):.1f}%** di risorse AI
+            """)
+        
+        return unique_products.drop(columns=['_normalized_code']), code_mapping
 
 def expand_results_to_original(results: List[Dict], code_mapping: Dict, 
                                csv_data: pd.DataFrame, code_column: str) -> List[Dict]:

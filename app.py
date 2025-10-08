@@ -462,6 +462,150 @@ st.markdown("""
 
 # Classe ProductCardGenerator (identica a prima)
 class ProductCardGenerator:
+    def filter_relevant_search_results(generator, ean: str, urls: List[str], 
+                                   product_data: Dict, column_mapping: Dict) -> List[str]:
+    """
+    Filtra i risultati di ricerca EAN escludendo quelli semanticamente non pertinenti.
+    Usa l'AI per determinare la rilevanza in base ai dati del prodotto.
+    """
+    if not urls or len(urls) <= 1:
+        return urls  # Se c'è solo 1 risultato o nessuno, non filtrare
+    
+    # Costruisci contesto prodotto dalle colonne mappate
+    product_context = []
+    for csv_col, var_name in column_mapping.items():
+        value = product_data.get(csv_col, "")
+        if pd.notna(value) and str(value).strip():
+            product_context.append(f"{var_name}: {value}")
+    
+    product_context_str = "\n".join(product_context) if product_context else "Informazioni prodotto non disponibili"
+    
+    # Scrape rapido dei titoli delle pagine
+    page_titles = []
+    for url in urls[:10]:  # Max 10 URL per evitare timeout
+        try:
+            response = requests.get(url, timeout=5, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.content, 'html.parser')
+                title = soup.title.get_text(strip=True) if soup.title else "Titolo non disponibile"
+                
+                # Estrai anche H1 e meta description per più contesto
+                h1 = soup.find('h1')
+                h1_text = h1.get_text(strip=True) if h1 else ""
+                
+                meta_desc = soup.find('meta', attrs={'name': 'description'})
+                meta_text = meta_desc.get('content') if meta_desc and meta_desc.get('content') else ""
+                
+                page_info = f"URL: {url}\nTitolo: {title}\nH1: {h1_text}\nDescrizione: {meta_text}"
+                page_titles.append(page_info)
+            else:
+                page_titles.append(f"URL: {url}\nTitolo: [Errore caricamento]")
+        except:
+            page_titles.append(f"URL: {url}\nTitolo: [Errore caricamento]")
+        
+        time.sleep(0.3)  # Rate limiting
+    
+    # Prompt per AI: valuta rilevanza
+    prompt = f"""Sei un esperto analista di e-commerce. Il tuo compito è valutare quali risultati di ricerca sono PERTINENTI al prodotto target.
+
+**PRODOTTO TARGET (EAN: {ean}):**
+{product_context_str}
+
+**RISULTATI RICERCA GOOGLE:**
+{chr(10).join([f"{i+1}. {page}" for i, page in enumerate(page_titles)])}
+
+**COMPITO:**
+Analizza ogni risultato e determina se è PERTINENTE al prodotto target. 
+Un risultato è pertinente se descrive lo STESSO prodotto o un prodotto MOLTO simile nella stessa categoria.
+Un risultato NON è pertinente se descrive un prodotto completamente diverso (altra categoria, altro uso, ecc.)
+
+**IMPORTANTE:**
+- Sii RIGOROSO: anche se l'EAN è presente, se il prodotto descritto è diverso, marcalo come NON pertinente
+- Ignora risultati su marketplace generici che potrebbero avere EAN sbagliati
+- Considera pertinenti solo prodotti della stessa categoria merceologica
+
+Rispondi SOLO con un JSON nel formato:
+{{
+    "relevant_indices": [1, 2, ...],
+    "reasoning": {{
+        "1": "Breve spiegazione perché pertinente o meno",
+        "2": "Breve spiegazione perché pertinente o meno",
+        ...
+    }}
+}}
+
+Includi in "relevant_indices" SOLO gli indici (1-based) dei risultati PERTINENTI.
+"""
+
+    try:
+        # Chiama AI per valutazione
+        if generator.ai_provider == "OpenAI":
+            response = generator.openai_client.chat.completions.create(
+                model=generator.model,
+                messages=[
+                    {"role": "system", "content": "Sei un esperto analista di e-commerce. Rispondi sempre in formato JSON valido."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1000,
+                temperature=0.3  # Bassa temperatura per risposte più deterministiche
+            )
+            content = response.choices[0].message.content.strip()
+        
+        elif generator.ai_provider == "Claude":
+            response = generator.anthropic_client.messages.create(
+                model=generator.model,
+                max_tokens=1000,
+                temperature=0.3,
+                system="Sei un esperto analista di e-commerce. Rispondi sempre in formato JSON valido.",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            content = response.content[0].text.strip()
+        else:
+            return urls  # Fallback: restituisci tutti gli URL
+        
+        # Parse risposta JSON
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+            relevant_indices = result.get('relevant_indices', [])
+            reasoning = result.get('reasoning', {})
+            
+            # Filtra URL pertinenti (converti da 1-based a 0-based)
+            filtered_urls = [urls[i-1] for i in relevant_indices if 0 < i <= len(urls)]
+            
+            # Log del filtro
+            excluded_count = len(urls) - len(filtered_urls)
+            if excluded_count > 0:
+                st.warning(f"🔍 **Filtro Semantico EAN {ean}:** Esclusi {excluded_count} risultati non pertinenti")
+                
+                with st.expander(f"📋 Dettagli Filtro EAN {ean}", expanded=False):
+                    for i, url in enumerate(urls, 1):
+                        if i in relevant_indices:
+                            st.success(f"✅ **Risultato {i}** - PERTINENTE")
+                            st.caption(f"URL: {url}")
+                            if str(i) in reasoning:
+                                st.caption(f"Motivo: {reasoning[str(i)]}")
+                        else:
+                            st.error(f"❌ **Risultato {i}** - ESCLUSO")
+                            st.caption(f"URL: {url}")
+                            if str(i) in reasoning:
+                                st.caption(f"Motivo: {reasoning[str(i)]}")
+                        st.markdown("---")
+            else:
+                st.success(f"✅ **Filtro Semantico EAN {ean}:** Tutti i risultati sono pertinenti")
+            
+            return filtered_urls if filtered_urls else urls[:1]  # Mantieni almeno 1 URL
+        else:
+            return urls  # Fallback: JSON parsing fallito
+    
+    except Exception as e:
+        st.warning(f"⚠️ Errore filtro semantico per EAN {ean}: {e}")
+        return urls  # Fallback: restituisci tutti gli URL
+    
     def deduplicate_products(csv_data: pd.DataFrame, code_column: str) -> Tuple[pd.DataFrame, Dict]:
     """
     Deduplica i prodotti in base al codice prodotto.
@@ -978,28 +1122,55 @@ Rispondi in italiano."""
         except Exception as e:
             return ""
     
-    def get_ean_context(self, ean: str, product_code: str = None) -> str:
-        """Ottieni contesto da EAN"""
+        def get_ean_context(self, ean: str, product_code: str = None, product_data: Dict = None, 
+                        column_mapping: Dict = None) -> str:
+        """Ottieni contesto da EAN con filtro semantico"""
         ean_log = {
             'timestamp': datetime.now().isoformat(),
             'ean': ean,
             'product_code': product_code or 'N/A',
             'search_results': [],
+            'filtered_results': [],
+            'excluded_results': [],
             'scraped_data': [],
             'total_characters': 0,
             'successful_scrapes': 0,
             'failed_scrapes': 0
         }
         
+        # Cerca su Google
         urls = self.search_ean_on_google(ean)
         
         if not urls:
+            st.warning(f"⚠️ Nessun risultato trovato per EAN: {ean}")
             ean_log['status'] = 'no_results'
             st.session_state.ean_logs.append(ean_log)
             return ""
         
+        st.info(f"🔍 Trovati {len(urls)} risultati per EAN: {ean}")
         ean_log['search_results'] = urls
         
+        # ✅ FILTRO SEMANTICO: Valuta pertinenza risultati
+        if product_data and column_mapping:
+            with st.spinner(f"🧠 Analisi semantica risultati per EAN {ean}..."):
+                filtered_urls = filter_relevant_search_results(
+                    self, ean, urls, product_data, column_mapping
+                )
+                
+                ean_log['filtered_results'] = filtered_urls
+                ean_log['excluded_results'] = [url for url in urls if url not in filtered_urls]
+                
+                urls = filtered_urls
+        
+        if not urls:
+            st.error(f"❌ Tutti i risultati sono stati esclusi come non pertinenti per EAN: {ean}")
+            ean_log['status'] = 'all_filtered'
+            st.session_state.ean_logs.append(ean_log)
+            return ""
+        
+        st.success(f"✅ Procedo con {len(urls)} risultati pertinenti")
+        
+        # Scrape contenuto
         contexts = []
         
         for i, url in enumerate(urls):
@@ -1034,8 +1205,10 @@ Rispondi in italiano."""
         
         if combined_context:
             ean_log['status'] = 'success'
+            st.success(f"✅ Estratti {len(contexts)} contenuti pertinenti ({len(combined_context)} caratteri)")
         else:
             ean_log['status'] = 'failed'
+            st.warning(f"⚠️ Nessun contenuto estratto per EAN: {ean}")
         
         st.session_state.ean_logs.append(ean_log)
         
@@ -1162,11 +1335,11 @@ Importante: Rispondi SOLO con il JSON, senza testo aggiuntivo."""
         except Exception as e:
             return None
     
-    def generate_product_content(self, product_data: Dict, site_info: Dict, 
+        def generate_product_content(self, product_data: Dict, site_info: Dict, 
                                 column_mapping: Dict, additional_instructions: str,
                                 fields_to_generate: List[str], ean_column: str = None,
                                 product_code: str = None, use_image_analysis: bool = False) -> Optional[Dict]:
-        """Genera contenuti prodotto"""
+        """Genera contenuti prodotto con filtro semantico EAN"""
         max_retries = 3
         retry_delay = 1
         
@@ -1174,11 +1347,12 @@ Importante: Rispondi SOLO con il JSON, senza testo aggiuntivo."""
         if use_image_analysis and product_code:
             image_data, image_analysis = self.analyze_product_image(product_code)
         
+        # ✅ Passa product_data e column_mapping per filtro semantico
         ean_context = ""
         if ean_column and ean_column in product_data:
             ean = str(product_data[ean_column])
             if ean and ean.strip() and ean != 'nan':
-                ean_context = self.get_ean_context(ean, product_code)
+                ean_context = self.get_ean_context(ean, product_code, product_data, column_mapping)
         
         for attempt in range(max_retries):
             try:
@@ -1283,6 +1457,7 @@ def process_batch(generator, batch_data, site_info, column_mapping, additional_i
         else:
             product_code = f"PROD_{current_index+1}"
         
+        # ✅ Passa product_data e column_mapping per il filtro semantico
         generated_content = generator.generate_product_content(
             row.to_dict(), site_info, column_mapping, additional_instructions,
             fields_to_generate, ean_column, product_code, use_image_analysis

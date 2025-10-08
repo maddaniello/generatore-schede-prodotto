@@ -19,7 +19,7 @@ import urllib.request
 # Configurazione pagina
 st.set_page_config(
     page_title="Moca - Generatore Schede Prodotto",
-    page_icon="https://mocainteractive.com/wp-content/uploads/2025/04/cropped-moca-instagram-icona-1-192x192.png",
+    page_icon="🔴",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -928,7 +928,7 @@ Rispondi in italiano."""
         st.info(f"🔍 Trovati {len(urls)} risultati per EAN: {ean}")
         ean_log['search_results'] = urls
         
-        # FILTRO SEMANTICO
+        # FILTRO SEMANTICO CON SUPPORTO COLORI DIVERSI
         if product_data and column_mapping:
             with st.spinner(f"🧠 Analisi semantica risultati per EAN {ean}..."):
                 filtered_urls = filter_relevant_search_results(
@@ -991,9 +991,9 @@ Rispondi in italiano."""
         return combined_context
     
     def create_prompt(self, product_data: Dict, site_info: Dict, column_mapping: Dict, 
-                     additional_instructions: str, fields_to_generate: List[str], 
+                     field_instructions: Dict, general_instructions: str, fields_to_generate: List[str], 
                      ean_context: str = "", image_analysis: str = "") -> str:
-        """Crea prompt per AI"""
+        """Crea prompt per AI con istruzioni specifiche per campo"""
         
         product_info = []
         for csv_col, var_name in column_mapping.items():
@@ -1019,35 +1019,57 @@ ANALISI VISIVA DEL PRODOTTO:
 IMPORTANTE: Utilizza le informazioni visive per arricchire le descrizioni.
 """
         
+        # Costruzione istruzioni per campo
         fields_instructions = []
         fields_json = {}
         
         if "Titolo Prodotto" in fields_to_generate:
-            fields_instructions.append("1. TITOLO PRODOTTO: Accattivante e informativo, max 80 caratteri")
+            base_instruction = "1. TITOLO PRODOTTO: Accattivante e informativo, max 80 caratteri"
+            if field_instructions.get('titolo'):
+                base_instruction += f"\n   ISTRUZIONI SPECIFICHE: {field_instructions['titolo']}"
+            fields_instructions.append(base_instruction)
             fields_json["titolo"] = "..."
         
         if "Short Description" in fields_to_generate:
-            fields_instructions.append("2. SHORT DESCRIPTION: Breve e coinvolgente, max 160 caratteri")
+            base_instruction = "2. SHORT DESCRIPTION: Breve e coinvolgente, max 160 caratteri"
+            if field_instructions.get('short_description'):
+                base_instruction += f"\n   ISTRUZIONI SPECIFICHE: {field_instructions['short_description']}"
+            fields_instructions.append(base_instruction)
             fields_json["short_description"] = "..."
         
         if "Description" in fields_to_generate:
-            fields_instructions.append("3. DESCRIPTION: Completa e dettagliata, max 1000 caratteri")
+            base_instruction = "3. DESCRIPTION: Completa e dettagliata, max 1000 caratteri"
+            if field_instructions.get('description'):
+                base_instruction += f"\n   ISTRUZIONI SPECIFICHE: {field_instructions['description']}"
+            fields_instructions.append(base_instruction)
             fields_json["description"] = "..."
         
         if "Bullet Points" in fields_to_generate:
-            fields_instructions.append("4. BULLET POINTS: 5 punti chiave caratteristiche/benefici")
+            base_instruction = "4. BULLET POINTS: 5 punti chiave caratteristiche/benefici"
+            if field_instructions.get('bullet_points'):
+                base_instruction += f"\n   ISTRUZIONI SPECIFICHE: {field_instructions['bullet_points']}"
+            fields_instructions.append(base_instruction)
             fields_json["bullet_points"] = ["...", "...", "...", "...", "..."]
         
         if "Meta Title" in fields_to_generate:
-            fields_instructions.append("5. META-TITLE SEO: Ottimizzato per motori di ricerca, max 60 caratteri")
+            base_instruction = "5. META-TITLE SEO: Ottimizzato per motori di ricerca, max 60 caratteri"
+            if field_instructions.get('meta_title'):
+                base_instruction += f"\n   ISTRUZIONI SPECIFICHE: {field_instructions['meta_title']}"
+            fields_instructions.append(base_instruction)
             fields_json["meta_title"] = "..."
         
         if "Meta Description" in fields_to_generate:
-            fields_instructions.append("6. META-DESCRIPTION SEO: Ottimizzata per CTR, max 155 caratteri")
+            base_instruction = "6. META-DESCRIPTION SEO: Ottimizzata per CTR, max 155 caratteri"
+            if field_instructions.get('meta_description'):
+                base_instruction += f"\n   ISTRUZIONI SPECIFICHE: {field_instructions['meta_description']}"
+            fields_instructions.append(base_instruction)
             fields_json["meta_description"] = "..."
         
         if "URL" in fields_to_generate:
-            fields_instructions.append("7. URL SLUG: URL-friendly, solo minuscole e trattini, max 80 caratteri")
+            base_instruction = "7. URL SLUG: URL-friendly, solo minuscole e trattini, max 80 caratteri"
+            if field_instructions.get('url_slug'):
+                base_instruction += f"\n   ISTRUZIONI SPECIFICHE: {field_instructions['url_slug']}"
+            fields_instructions.append(base_instruction)
             fields_json["url_slug"] = "..."
         
         fields_instructions_str = "\n".join(fields_instructions)
@@ -1064,8 +1086,8 @@ DATI PRODOTTO:
 {ean_section}
 {image_section}
 
-ISTRUZIONI AGGIUNTIVE:
-{additional_instructions if additional_instructions else "Nessuna istruzione specifica"}
+ISTRUZIONI GENERALI:
+{general_instructions if general_instructions else "Nessuna istruzione generale specificata"}
 
 COMPITO:
 Genera ESATTAMENTE i seguenti elementi per questo prodotto:
@@ -1112,9 +1134,10 @@ Importante: Rispondi SOLO con il JSON, senza testo aggiuntivo."""
             return None
     
     def generate_product_content(self, product_data: Dict, site_info: Dict, 
-                                column_mapping: Dict, additional_instructions: str,
-                                fields_to_generate: List[str], ean_column: str = None,
-                                product_code: str = None, use_image_analysis: bool = False) -> Optional[Dict]:
+                                column_mapping: Dict, field_instructions: Dict, 
+                                general_instructions: str, fields_to_generate: List[str], 
+                                ean_column: str = None, product_code: str = None, 
+                                use_image_analysis: bool = False) -> Optional[Dict]:
         """Genera contenuti prodotto con filtro semantico EAN"""
         max_retries = 3
         retry_delay = 1
@@ -1132,8 +1155,8 @@ Importante: Rispondi SOLO con il JSON, senza testo aggiuntivo."""
         for attempt in range(max_retries):
             try:
                 prompt = self.create_prompt(product_data, site_info, column_mapping, 
-                                          additional_instructions, fields_to_generate, 
-                                          ean_context, image_analysis)
+                                          field_instructions, general_instructions, 
+                                          fields_to_generate, ean_context, image_analysis)
                 
                 if self.ai_provider == "OpenAI":
                     content = self.generate_with_openai(prompt)
@@ -1167,10 +1190,11 @@ Importante: Rispondi SOLO con il JSON, senza testo aggiuntivo."""
         
         return None
 
-# FUNZIONE FILTRO SEMANTICO
+# FUNZIONE FILTRO SEMANTICO MIGLIORATA (SUPPORTA COLORI DIVERSI)
 def filter_relevant_search_results(generator, ean: str, urls: List[str], 
                                    product_data: Dict, column_mapping: Dict) -> List[str]:
-    """Filtra i risultati di ricerca EAN escludendo quelli semanticamente non pertinenti"""
+    """Filtra i risultati di ricerca EAN escludendo quelli semanticamente non pertinenti
+    MIGLIORAMENTO: Accetta prodotti con colore diverso come pertinenti"""
     if not urls or len(urls) <= 1:
         return urls
     
@@ -1217,14 +1241,23 @@ def filter_relevant_search_results(generator, ean: str, urls: List[str],
 
 **COMPITO:**
 Analizza ogni risultato e determina se è PERTINENTE al prodotto target. 
-Un risultato è pertinente se descrive lo STESSO prodotto o un prodotto MOLTO simile nella stessa categoria. Un prodotto uguale ma con colore diverso va bene, basta non prendere in considerazione il colore nelle caratteristiche utili.
-Un risultato NON è pertinente se descrive un prodotto completamente diverso (altro prodotto)
+
+**REGOLE DI PERTINENZA:**
+✅ Un risultato è PERTINENTE se descrive lo STESSO prodotto o un prodotto MOLTO simile nella stessa categoria
+✅ IMPORTANTE: Un prodotto IDENTICO ma con COLORE DIVERSO è PERTINENTE (ignora il colore nelle caratteristiche)
+✅ Stessa tipologia di prodotto, stesso brand, stesse caratteristiche tecniche = PERTINENTE anche se colore diverso
+❌ Un risultato NON è pertinente solo se descrive un prodotto COMPLETAMENTE DIVERSO (altra categoria/tipologia)
+
+**ESEMPI:**
+- Prodotto target: T-shirt Nike Dri-FIT rossa → Risultato: T-shirt Nike Dri-FIT blu = ✅ PERTINENTE
+- Prodotto target: Scarpe running Adidas Ultraboost nere → Risultato: Scarpe running Adidas Ultraboost bianche = ✅ PERTINENTE  
+- Prodotto target: iPhone 15 Pro nero → Risultato: iPhone 15 Pro bianco = ✅ PERTINENTE
+- Prodotto target: Zaino da trekking 30L → Risultato: Borsa da viaggio 50L = ❌ NON PERTINENTE
 
 **IMPORTANTE:**
-- Sii RIGOROSO: anche se l'EAN è presente, se il prodotto descritto è diverso, marcalo come NON pertinente
-- Tieni in considerazione prodotti uguali ma con colore diverso
+- Sii RIGOROSO ma FLESSIBILE sul colore: stessa categoria + stesse caratteristiche + colore diverso = PERTINENTE
 - Ignora risultati su marketplace generici che potrebbero avere EAN sbagliati
-- Considera pertinenti solo prodotti della stessa categoria merceologica
+- Considera pertinenti prodotti della stessa linea/modello anche se con variante colore diversa
 
 Rispondi SOLO con un JSON nel formato:
 {{
@@ -1324,7 +1357,7 @@ def deduplicate_products(csv_data: pd.DataFrame, code_column: str) -> Tuple[pd.D
     
     if duplicates > 0:
         st.info(f"""
-        🔄 **Deduplicazione Intelligente Attivata**
+        📄 **Deduplicazione Intelligente Attivata**
         - Prodotti totali nel CSV: **{total_products}**
         - Prodotti unici da elaborare: **{unique_count}**
         - Duplicati rilevati: **{duplicates}** (verranno riutilizzati i contenuti)
@@ -1410,12 +1443,17 @@ def initialize_session_state():
         st.session_state.code_mapping = {}
     if 'original_csv_data' not in st.session_state:
         st.session_state.original_csv_data = None
-    # ✅ NUOVO: per carosello immagini
     if 'image_carousel_index' not in st.session_state:
         st.session_state.image_carousel_index = 0
+    # ✅ NUOVO: istruzioni specifiche per campo
+    if 'field_instructions' not in st.session_state:
+        st.session_state.field_instructions = {}
+    if 'general_instructions' not in st.session_state:
+        st.session_state.general_instructions = ""
 
-def process_batch(generator, batch_data, site_info, column_mapping, additional_instructions, 
-                 code_column, start_index, fields_to_generate, ean_column, use_image_analysis):
+def process_batch(generator, batch_data, site_info, column_mapping, field_instructions, 
+                 general_instructions, code_column, start_index, fields_to_generate, 
+                 ean_column, use_image_analysis):
     """Elabora batch prodotti"""
     batch_results = []
     
@@ -1429,8 +1467,9 @@ def process_batch(generator, batch_data, site_info, column_mapping, additional_i
             product_code = f"PROD_{current_index+1}"
         
         generated_content = generator.generate_product_content(
-            row.to_dict(), site_info, column_mapping, additional_instructions,
-            fields_to_generate, ean_column, product_code, use_image_analysis
+            row.to_dict(), site_info, column_mapping, field_instructions, 
+            general_instructions, fields_to_generate, ean_column, product_code, 
+            use_image_analysis
         )
         
         if generated_content:
@@ -1480,7 +1519,7 @@ def render_product_preview():
             st.rerun()
     
     with col2:
-        st.markdown(f"<p style='text-align: center; color: #8A8A8A; font-weight: 600;'>Prodotto {st.session_state.preview_index + 1} di {len(st.session_state.results)}</p>", unsafe_allow_html=True)
+        st.markdown(f"st.markdown(f"<p style='text-align: center; color: #8A8A8A; font-weight: 600;'>Prodotto {st.session_state.preview_index + 1} di {len(st.session_state.results)}</p>", unsafe_allow_html=True)
     
     with col3:
         if st.button("▶", key="next_product", disabled=(st.session_state.preview_index >= len(st.session_state.results) - 1)):
@@ -1601,7 +1640,7 @@ def render_product_preview():
     
     if 'meta_description' in product and product['meta_description']:
         st.markdown('<div class="product-meta">', unsafe_allow_html=True)
-        st.markdown('<p class="product-field-label">🔍 Meta Description SEO</p>', unsafe_allow_html=True)
+        st.markdown('<p class="product-field-label">📝 Meta Description SEO</p>', unsafe_allow_html=True)
         st.markdown(f'<p class="product-field-content">{product["meta_description"]}</p>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
@@ -1839,7 +1878,7 @@ def main():
             else:
                 st.warning("⚠️ Mappa almeno una colonna per continuare")
     
-    # STEP 4: Opzioni Avanzate
+    # STEP 4: Opzioni Avanzate (CON ISTRUZIONI PER CAMPO)
     elif st.session_state.current_step == 4:
         st.markdown('<div class="step-container">', unsafe_allow_html=True)
         st.markdown('''
@@ -1872,11 +1911,6 @@ def main():
             else:
                 tone_of_voice = tone_options[tone_choice]
         
-        additional_instructions = st.text_area(
-            "📝 Istruzioni Aggiuntive (opzionale):",
-            placeholder="Esempio: Usa emoji, includi materiale nel titolo, max 60 caratteri per titolo"
-        )
-        
         st.markdown("---")
         
         st.subheader("📝 Campi da Generare")
@@ -1898,6 +1932,85 @@ def main():
         )
         
         st.session_state.fields_to_generate = selected_fields
+        
+        st.markdown("---")
+        
+        # ✅ NUOVA SEZIONE: Istruzioni Specifiche per Campo
+        st.subheader("✍️ Istruzioni Personalizzate per AI")
+        
+        st.info("💡 **Tip:** Puoi dare istruzioni specifiche per ogni campo (es: 'Includi il materiale nel titolo') e istruzioni generali che valgono per tutti i campi.")
+        
+        with st.expander("📋 Istruzioni Specifiche per Campo", expanded=False):
+            field_instructions = {}
+            
+            if "Titolo Prodotto" in selected_fields:
+                field_instructions['titolo'] = st.text_area(
+                    "🏷️ Istruzioni per TITOLO PRODOTTO:",
+                    value=st.session_state.field_instructions.get('titolo', ''),
+                    placeholder="Es: Includi sempre il materiale e il brand nel titolo, usa emoji, max 60 caratteri",
+                    key="instr_titolo"
+                )
+            
+            if "Short Description" in selected_fields:
+                field_instructions['short_description'] = st.text_area(
+                    "📝 Istruzioni per SHORT DESCRIPTION:",
+                    value=st.session_state.field_instructions.get('short_description', ''),
+                    placeholder="Es: Focus sui benefici principali, linguaggio emozionale, max 120 caratteri",
+                    key="instr_short_desc"
+                )
+            
+            if "Description" in selected_fields:
+                field_instructions['description'] = st.text_area(
+                    "📄 Istruzioni per DESCRIPTION:",
+                    value=st.session_state.field_instructions.get('description', ''),
+                    placeholder="Es: Includi dettagli tecnici, contesto d'uso, materiali, benefici e cura del prodotto",
+                    key="instr_desc"
+                )
+            
+            if "Bullet Points" in selected_fields:
+                field_instructions['bullet_points'] = st.text_area(
+                    "🎯 Istruzioni per BULLET POINTS:",
+                    value=st.session_state.field_instructions.get('bullet_points', ''),
+                    placeholder="Es: Ogni punto deve iniziare con un verbo d'azione, max 10 parole per punto",
+                    key="instr_bullets"
+                )
+            
+            if "Meta Title" in selected_fields:
+                field_instructions['meta_title'] = st.text_area(
+                    "🔍 Istruzioni per META TITLE SEO:",
+                    value=st.session_state.field_instructions.get('meta_title', ''),
+                    placeholder="Es: Include parola chiave all'inizio, brand alla fine, max 55 caratteri",
+                    key="instr_meta_title"
+                )
+            
+            if "Meta Description" in selected_fields:
+                field_instructions['meta_description'] = st.text_area(
+                    "📝 Istruzioni per META DESCRIPTION SEO:",
+                    value=st.session_state.field_instructions.get('meta_description', ''),
+                    placeholder="Es: Includi call to action, parole chiave naturali, max 150 caratteri",
+                    key="instr_meta_desc"
+                )
+            
+            if "URL" in selected_fields:
+                field_instructions['url_slug'] = st.text_area(
+                    "🔗 Istruzioni per URL SLUG:",
+                    value=st.session_state.field_instructions.get('url_slug', ''),
+                    placeholder="Es: Formato: brand-tipo-prodotto-codice, solo caratteri alfanumerici e trattini",
+                    key="instr_url"
+                )
+            
+            st.session_state.field_instructions = field_instructions
+        
+        # Istruzioni generali
+        general_instructions = st.text_area(
+            "📢 Istruzioni GENERALI (valide per tutti i campi):",
+            value=st.session_state.general_instructions,
+            placeholder="Es: Usa un linguaggio inclusivo, evita superlativi esagerati, focus su sostenibilità...",
+            height=150,
+            key="general_instr"
+        )
+        
+        st.session_state.general_instructions = general_instructions
         
         st.markdown("---")
         
@@ -1962,7 +2075,6 @@ def main():
             'site_url': site_url,
             'tone_of_voice': tone_of_voice
         }
-        st.session_state.additional_instructions = additional_instructions
         st.session_state.delay_between_batches = delay_between_batches
         
         st.markdown("</div>", unsafe_allow_html=True)
@@ -2078,7 +2190,9 @@ def main():
                     batch_results = process_batch(
                         generator, batch_data, st.session_state.site_info, 
                         st.session_state.column_mapping,
-                        st.session_state.additional_instructions, code_column, start_idx,
+                        st.session_state.field_instructions,
+                        st.session_state.general_instructions,
+                        code_column, start_idx,
                         st.session_state.fields_to_generate, 
                         st.session_state.get('ean_column', None) if st.session_state.serper_configured else None,
                         st.session_state.use_image_analysis
@@ -2091,7 +2205,7 @@ def main():
                     time.sleep(st.session_state.delay_between_batches)
                     st.rerun()
                 else:
-                    st.markdown("### 🔄 Espansione risultati a tutte le righe...")
+                    st.markdown("### 📄 Espansione risultati a tutte le righe...")
                     
                     if st.session_state.code_mapping:
                         with st.spinner("Applicando i contenuti generati a tutte le varianti..."):
@@ -2229,8 +2343,8 @@ def main():
     st.markdown("""
     <div style='text-align: center; padding: 2rem;'>
         <p style='color: #8A8A8A; font-size: 0.9rem; margin: 0;'>
-            <strong>Moca</strong> - Generatore Schede Prodotto v3.0<br>
-            Powered by AI • Ricerca EAN • Analisi Immagini<br>
+            <strong>Moca</strong> - Generatore Schede Prodotto v3.1<br>
+            Powered by AI • Ricerca EAN • Analisi Immagini • Istruzioni Personalizzate<br>
             © 2025 Daniele Pisciottano
         </p>
     </div>

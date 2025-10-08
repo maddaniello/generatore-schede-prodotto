@@ -1409,6 +1409,9 @@ def initialize_session_state():
         st.session_state.code_mapping = {}
     if 'original_csv_data' not in st.session_state:
         st.session_state.original_csv_data = None
+    # ✅ NUOVO: per carosello immagini
+    if 'image_carousel_index' not in st.session_state:
+        st.session_state.image_carousel_index = 0
 
 def process_batch(generator, batch_data, site_info, column_mapping, additional_instructions, 
                  code_column, start_index, fields_to_generate, ean_column, use_image_analysis):
@@ -1461,12 +1464,13 @@ def process_batch(generator, batch_data, site_info, column_mapping, additional_i
     return batch_results
 
 def render_product_preview():
-    """Renderizza anteprima scheda prodotto"""
+    """Renderizza anteprima scheda prodotto con immagini"""
     if not st.session_state.results:
         return
     
     st.markdown('<div class="product-preview">', unsafe_allow_html=True)
     
+    # Navigazione
     col1, col2, col3 = st.columns([1, 8, 1])
     
     with col1:
@@ -1482,13 +1486,92 @@ def render_product_preview():
             st.session_state.preview_index = min(len(st.session_state.results) - 1, st.session_state.preview_index + 1)
             st.rerun()
     
+    # Dati prodotto
     product = st.session_state.results[st.session_state.preview_index]
+    product_code = product.get('codice_prodotto', '')
     
+    # ===== SEZIONE IMMAGINI =====
+    generator = st.session_state.generator
+    
+    # Normalizza codice per cercare immagini
+    normalized_code = str(product_code).strip().strip("'").strip('"')
+    
+    # Verifica se ci sono immagini per questo prodotto
+    if normalized_code in generator.product_images:
+        images_list = generator.product_images[normalized_code]
+        
+        st.markdown("---")
+        st.markdown('<p style="text-align: center; color: #8A8A8A; font-weight: 600; font-size: 0.9rem; margin-bottom: 1rem;">📸 IMMAGINI PRODOTTO</p>', unsafe_allow_html=True)
+        
+        # Mostra immagini
+        if len(images_list) == 1:
+            # Una sola immagine - mostra grande
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                try:
+                    img = Image.open(io.BytesIO(images_list[0]))
+                    st.image(img, use_container_width=True, caption=f"Immagine prodotto")
+                except Exception as e:
+                    st.warning(f"⚠️ Errore visualizzazione immagine: {e}")
+        
+        elif len(images_list) <= 3:
+            # 2-3 immagini - mostra in colonne
+            cols = st.columns(len(images_list))
+            for idx, img_data in enumerate(images_list):
+                with cols[idx]:
+                    try:
+                        img = Image.open(io.BytesIO(img_data))
+                        st.image(img, use_container_width=True, caption=f"Immagine {idx + 1}")
+                    except Exception as e:
+                        st.warning(f"⚠️ Errore immagine {idx + 1}")
+        
+        else:
+            # Più di 3 immagini - mostra in griglia con carosello
+            st.markdown('<div style="background-color: #FFE7E6; padding: 1rem; border-radius: 8px;">', unsafe_allow_html=True)
+            
+            # Inizializza indice immagine nel session state se non esiste
+            if 'image_carousel_index' not in st.session_state:
+                st.session_state.image_carousel_index = 0
+            
+            # Carosello per più immagini
+            carousel_col1, carousel_col2, carousel_col3 = st.columns([1, 8, 1])
+            
+            with carousel_col1:
+                if st.button("◀", key="prev_image", disabled=(st.session_state.image_carousel_index == 0)):
+                    st.session_state.image_carousel_index = max(0, st.session_state.image_carousel_index - 3)
+                    st.rerun()
+            
+            with carousel_col2:
+                # Mostra 3 immagini alla volta
+                start_idx = st.session_state.image_carousel_index
+                end_idx = min(start_idx + 3, len(images_list))
+                
+                img_cols = st.columns(3)
+                for i, idx in enumerate(range(start_idx, end_idx)):
+                    with img_cols[i]:
+                        try:
+                            img = Image.open(io.BytesIO(images_list[idx]))
+                            st.image(img, use_container_width=True, caption=f"Img {idx + 1}/{len(images_list)}")
+                        except Exception as e:
+                            st.warning(f"⚠️ Errore")
+            
+            with carousel_col3:
+                if st.button("▶", key="next_image", disabled=(st.session_state.image_carousel_index + 3 >= len(images_list))):
+                    st.session_state.image_carousel_index = min(len(images_list) - 3, st.session_state.image_carousel_index + 3)
+                    st.rerun()
+            
+            st.markdown(f'<p style="text-align: center; color: #8A8A8A; font-size: 0.85rem; margin-top: 0.5rem;">{len(images_list)} immagini totali</p>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown("---")
+    
+    # ===== TITOLO E CODICE =====
     if 'titolo' in product:
         st.markdown(f'<h2 class="product-title-preview">{product["titolo"]}</h2>', unsafe_allow_html=True)
     
-    st.markdown(f'<p style="text-align: center; color: #8A8A8A; font-size: 0.9rem; margin-bottom: 2rem;">Codice: <strong>{product["codice_prodotto"]}</strong></p>', unsafe_allow_html=True)
+    st.markdown(f'<p style="text-align: center; color: #8A8A8A; font-size: 0.9rem; margin-bottom: 2rem;">Codice: <strong>{product_code}</strong></p>', unsafe_allow_html=True)
     
+    # ===== CAMPI GENERATI =====
     if 'short_description' in product and product['short_description']:
         st.markdown('<div class="product-meta">', unsafe_allow_html=True)
         st.markdown('<p class="product-field-label">📝 Short Description</p>', unsafe_allow_html=True)
@@ -1534,8 +1617,15 @@ def main():
     
     st.markdown("""
     <div class="main-header">
-        <h1>🔴 Moca - Generatore Schede Prodotto</h1>
-        <p>Genera schede prodotto professionali con AI, ricerca EAN e analisi immagini</p>
+        <div style="display: flex; align-items: center; justify-content: center; gap: 1.5rem; margin-bottom: 1rem;">
+            <img src="https://mocainteractive.com/wp-content/uploads/2025/04/cropped-moca_logo-positivo-1.png" 
+                 alt="Moca Logo" 
+                 style="height: 60px; filter: brightness(0) invert(1);">
+            <h1 style="margin: 0; color: white; font-weight: 800; font-size: 2.5rem;">Generatore Schede Prodotto</h1>
+        </div>
+        <p style="color: #FFE7E6; text-align: center; font-size: 1.1rem; margin: 0; font-weight: 500;">
+            Genera schede prodotto professionali con AI, ricerca EAN e analisi immagini
+        </p>
     </div>
     """, unsafe_allow_html=True)
     

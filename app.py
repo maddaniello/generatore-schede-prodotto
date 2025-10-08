@@ -1121,97 +1121,96 @@ Rispondi in italiano."""
         except Exception as e:
             return ""
     
-        def get_ean_context(self, ean: str, product_code: str = None, product_data: Dict = None, 
-                        column_mapping: Dict = None) -> str:
-        """Ottieni contesto da EAN con filtro semantico"""
-        ean_log = {
-            'timestamp': datetime.now().isoformat(),
-            'ean': ean,
-            'product_code': product_code or 'N/A',
-            'search_results': [],
-            'filtered_results': [],
-            'excluded_results': [],
-            'scraped_data': [],
-            'total_characters': 0,
-            'successful_scrapes': 0,
-            'failed_scrapes': 0
-        }
-        
-        # Cerca su Google
-        urls = self.search_ean_on_google(ean)
-        
-        if not urls:
-            st.warning(f"⚠️ Nessun risultato trovato per EAN: {ean}")
-            ean_log['status'] = 'no_results'
-            st.session_state.ean_logs.append(ean_log)
-            return ""
-        
-        st.info(f"🔍 Trovati {len(urls)} risultati per EAN: {ean}")
-        ean_log['search_results'] = urls
-        
-        # ✅ FILTRO SEMANTICO: Valuta pertinenza risultati
-        if product_data and column_mapping:
-            with st.spinner(f"🧠 Analisi semantica risultati per EAN {ean}..."):
-                filtered_urls = filter_relevant_search_results(
-                    self, ean, urls, product_data, column_mapping
-                )
-                
-                ean_log['filtered_results'] = filtered_urls
-                ean_log['excluded_results'] = [url for url in urls if url not in filtered_urls]
-                
-                urls = filtered_urls
-        
-        if not urls:
-            st.error(f"❌ Tutti i risultati sono stati esclusi come non pertinenti per EAN: {ean}")
-            ean_log['status'] = 'all_filtered'
-            st.session_state.ean_logs.append(ean_log)
-            return ""
-        
-        st.success(f"✅ Procedo con {len(urls)} risultati pertinenti")
-        
-        # Scrape contenuto
-        contexts = []
-        
-        for i, url in enumerate(urls):
-            content = ""
-            for attempt in range(2):
-                content = self.scrape_product_page(url)
-                if content:
-                    break
-                elif attempt == 0:
-                    time.sleep(2)
-            
-            scrape_log = {
-                'url': url,
-                'position': i + 1,
-                'characters_extracted': len(content),
-                'success': bool(content)
+        def get_ean_context(self, ean: str, product_code: str = None, product_data: Dict = None, column_mapping: Dict = None) -> str:
+            """Ottieni contesto da EAN con filtro semantico"""
+            ean_log = {
+                'timestamp': datetime.now().isoformat(),
+                'ean': ean,
+                'product_code': product_code or 'N/A',
+                'search_results': [],
+                'filtered_results': [],
+                'excluded_results': [],
+                'scraped_data': [],
+                'total_characters': 0,
+                'successful_scrapes': 0,
+                'failed_scrapes': 0
             }
             
-            if content:
-                contexts.append(content)
-                ean_log['successful_scrapes'] += 1
-                scrape_log['preview'] = content[:200]
-            else:
-                ean_log['failed_scrapes'] += 1
-                scrape_log['preview'] = None
+            # Cerca su Google
+            urls = self.search_ean_on_google(ean)
             
-            ean_log['scraped_data'].append(scrape_log)
-            time.sleep(0.5)
-        
-        combined_context = "\n\n".join(contexts)
-        ean_log['total_characters'] = len(combined_context)
-        
-        if combined_context:
-            ean_log['status'] = 'success'
-            st.success(f"✅ Estratti {len(contexts)} contenuti pertinenti ({len(combined_context)} caratteri)")
-        else:
-            ean_log['status'] = 'failed'
-            st.warning(f"⚠️ Nessun contenuto estratto per EAN: {ean}")
-        
-        st.session_state.ean_logs.append(ean_log)
-        
-        return combined_context
+            if not urls:
+                st.warning(f"⚠️ Nessun risultato trovato per EAN: {ean}")
+                ean_log['status'] = 'no_results'
+                st.session_state.ean_logs.append(ean_log)
+                return ""
+            
+            st.info(f"🔍 Trovati {len(urls)} risultati per EAN: {ean}")
+            ean_log['search_results'] = urls
+            
+            # ✅ FILTRO SEMANTICO: Valuta pertinenza risultati
+            if product_data and column_mapping:
+                with st.spinner(f"🧠 Analisi semantica risultati per EAN {ean}..."):
+                    filtered_urls = filter_relevant_search_results(
+                        self, ean, urls, product_data, column_mapping
+                    )
+                    
+                    ean_log['filtered_results'] = filtered_urls
+                    ean_log['excluded_results'] = [url for url in urls if url not in filtered_urls]
+                    
+                    urls = filtered_urls
+            
+            if not urls:
+                st.error(f"❌ Tutti i risultati sono stati esclusi come non pertinenti per EAN: {ean}")
+                ean_log['status'] = 'all_filtered'
+                st.session_state.ean_logs.append(ean_log)
+                return ""
+            
+            st.success(f"✅ Procedo con {len(urls)} risultati pertinenti")
+            
+            # Scrape contenuto
+            contexts = []
+            
+            for i, url in enumerate(urls):
+                content = ""
+                for attempt in range(2):
+                    content = self.scrape_product_page(url)
+                    if content:
+                        break
+                    elif attempt == 0:
+                        time.sleep(2)
+                
+                scrape_log = {
+                    'url': url,
+                    'position': i + 1,
+                    'characters_extracted': len(content),
+                    'success': bool(content)
+                }
+                
+                if content:
+                    contexts.append(content)
+                    ean_log['successful_scrapes'] += 1
+                    scrape_log['preview'] = content[:200]
+                else:
+                    ean_log['failed_scrapes'] += 1
+                    scrape_log['preview'] = None
+                
+                ean_log['scraped_data'].append(scrape_log)
+                time.sleep(0.5)
+            
+            combined_context = "\n\n".join(contexts)
+            ean_log['total_characters'] = len(combined_context)
+            
+            if combined_context:
+                ean_log['status'] = 'success'
+                st.success(f"✅ Estratti {len(contexts)} contenuti pertinenti ({len(combined_context)} caratteri)")
+            else:
+                ean_log['status'] = 'failed'
+                st.warning(f"⚠️ Nessun contenuto estratto per EAN: {ean}")
+            
+            st.session_state.ean_logs.append(ean_log)
+            
+            return combined_context
     
     def create_prompt(self, product_data: Dict, site_info: Dict, column_mapping: Dict, 
                      additional_instructions: str, fields_to_generate: List[str], 

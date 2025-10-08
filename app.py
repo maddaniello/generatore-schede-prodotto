@@ -1337,58 +1337,58 @@ Importante: Rispondi SOLO con il JSON, senza testo aggiuntivo."""
                                 column_mapping: Dict, additional_instructions: str,
                                 fields_to_generate: List[str], ean_column: str = None,
                                 product_code: str = None, use_image_analysis: bool = False) -> Optional[Dict]:
-        """Genera contenuti prodotto con filtro semantico EAN"""
-        max_retries = 3
-        retry_delay = 1
-        
-        image_analysis = ""
-        if use_image_analysis and product_code:
-            image_data, image_analysis = self.analyze_product_image(product_code)
-        
-        # ✅ Passa product_data e column_mapping per filtro semantico
-        ean_context = ""
-        if ean_column and ean_column in product_data:
-            ean = str(product_data[ean_column])
-            if ean and ean.strip() and ean != 'nan':
-                ean_context = self.get_ean_context(ean, product_code, product_data, column_mapping)
-        
-        for attempt in range(max_retries):
-            try:
-                prompt = self.create_prompt(product_data, site_info, column_mapping, 
-                                          additional_instructions, fields_to_generate, 
-                                          ean_context, image_analysis)
-                
-                if self.ai_provider == "OpenAI":
-                    content = self.generate_with_openai(prompt)
-                elif self.ai_provider == "Claude":
-                    content = self.generate_with_claude(prompt)
-                else:
-                    return None
-                
-                if not content:
-                    continue
-                
+            """Genera contenuti prodotto con filtro semantico EAN"""
+            max_retries = 3
+            retry_delay = 1
+            
+            image_analysis = ""
+            if use_image_analysis and product_code:
+                image_data, image_analysis = self.analyze_product_image(product_code)
+            
+            # ✅ Passa product_data e column_mapping per filtro semantico
+            ean_context = ""
+            if ean_column and ean_column in product_data:
+                ean = str(product_data[ean_column])
+                if ean and ean.strip() and ean != 'nan':
+                    ean_context = self.get_ean_context(ean, product_code, product_data, column_mapping)
+            
+            for attempt in range(max_retries):
                 try:
-                    result = json.loads(content)
-                    return result
-                except json.JSONDecodeError:
-                    json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                    if json_match:
-                        result = json.loads(json_match.group())
-                        return result
+                    prompt = self.create_prompt(product_data, site_info, column_mapping, 
+                                              additional_instructions, fields_to_generate, 
+                                              ean_context, image_analysis)
+                    
+                    if self.ai_provider == "OpenAI":
+                        content = self.generate_with_openai(prompt)
+                    elif self.ai_provider == "Claude":
+                        content = self.generate_with_claude(prompt)
                     else:
-                        if attempt == max_retries - 1:
-                            return None
+                        return None
+                    
+                    if not content:
                         continue
-                        
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    return None
-                else:
-                    time.sleep(retry_delay * (attempt + 1))
-                    continue
-        
-        return None
+                    
+                    try:
+                        result = json.loads(content)
+                        return result
+                    except json.JSONDecodeError:
+                        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                        if json_match:
+                            result = json.loads(json_match.group())
+                            return result
+                        else:
+                            if attempt == max_retries - 1:
+                                return None
+                            continue
+                            
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        return None
+                    else:
+                        time.sleep(retry_delay * (attempt + 1))
+                        continue
+            
+            return None
 
 # Inizializzazione Session State
 def initialize_session_state():

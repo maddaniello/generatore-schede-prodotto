@@ -19,7 +19,7 @@ import urllib.request
 # Configurazione pagina
 st.set_page_config(
     page_title="Moca - Generatore Schede Prodotto",
-    page_icon="https://mocainteractive.com/wp-content/uploads/2025/04/cropped-moca-instagram-icona-1-192x192.png",
+    page_icon="🔴",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -1519,8 +1519,8 @@ def render_product_preview():
             st.rerun()
     
     with col2:
-        st.markdown(f"<p style='text-align: center; color: #8A8A8A; font-weight: 600;'>Prodotto {st.session_state.preview_index + 1} di {len(st.session_state.results)}</p>", unsafe_allow_html=True)
-    
+         st.markdown(f"<p style='text-align: center; color: #8A8A8A; font-weight: 600;'>Prodotto {st.session_state.preview_index + 1} di {len(st.session_state.results)}</p>", unsafe_allow_html=True)
+         
     with col3:
         if st.button("▶", key="next_product", disabled=(st.session_state.preview_index >= len(st.session_state.results) - 1)):
             st.session_state.preview_index = min(len(st.session_state.results) - 1, st.session_state.preview_index + 1)
@@ -2351,4 +2351,4 @@ def main():
     """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
-    main()
+    main()     

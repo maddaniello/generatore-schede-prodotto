@@ -649,12 +649,12 @@ Rispondi in italiano."""
             media_type = format_map.get(img.format, 'image/jpeg')
             
             if total_images > 1:
-                context_text = f"""Analizza questa immagine prodotto (immagine {image_index} di {total_images}). 
+                context_text = f"""Analizza questa immagine prodotto indossato da una persona (immagine {image_index} di {total_images}). 
 IMPORTANTE: Concentrati SOLO sul prodotto, IGNORA completamente eventuali persone/modelli presenti.
 
 Descrivi in modo dettagliato:"""
             else:
-                context_text = """Analizza questa immagine prodotto in modo dettagliato.
+                context_text = """Analizza questa immagine prodotto indossato da una persona in modo dettagliato.
 IMPORTANTE: Concentrati SOLO sul prodotto, IGNORA completamente eventuali persone/modelli presenti.
 
 Descrivi:"""

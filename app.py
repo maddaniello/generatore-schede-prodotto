@@ -1519,7 +1519,7 @@ def render_product_preview():
             st.rerun()
     
     with col2:
-        st.markdown(f"st.markdown(f"<p style='text-align: center; color: #8A8A8A; font-weight: 600;'>Prodotto {st.session_state.preview_index + 1} di {len(st.session_state.results)}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: center; color: #8A8A8A; font-weight: 600;'>Prodotto {st.session_state.preview_index + 1} di {len(st.session_state.results)}</p>", unsafe_allow_html=True)
     
     with col3:
         if st.button("▶", key="next_product", disabled=(st.session_state.preview_index >= len(st.session_state.results) - 1)):

@@ -1217,11 +1217,12 @@ def filter_relevant_search_results(generator, ean: str, urls: List[str],
 
 **COMPITO:**
 Analizza ogni risultato e determina se è PERTINENTE al prodotto target. 
-Un risultato è pertinente se descrive lo STESSO prodotto o un prodotto MOLTO simile nella stessa categoria.
-Un risultato NON è pertinente se descrive un prodotto completamente diverso (altra categoria, altro uso, ecc.)
+Un risultato è pertinente se descrive lo STESSO prodotto o un prodotto MOLTO simile nella stessa categoria. Un prodotto uguale ma con colore diverso va bene, basta non prendere in considerazione il colore nelle caratteristiche utili.
+Un risultato NON è pertinente se descrive un prodotto completamente diverso (altro prodotto)
 
 **IMPORTANTE:**
 - Sii RIGOROSO: anche se l'EAN è presente, se il prodotto descritto è diverso, marcalo come NON pertinente
+- Tieni in considerazione prodotti uguali ma con colore diverso
 - Ignora risultati su marketplace generici che potrebbero avere EAN sbagliati
 - Considera pertinenti solo prodotti della stessa categoria merceologica
 

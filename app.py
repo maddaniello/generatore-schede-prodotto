@@ -24,7 +24,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# CSS Personalizzato con i colori del logo
 # CSS Personalizzato con i colori del logo + DARK MODE SUPPORT
 st.markdown("""
 <style>
@@ -460,227 +459,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Classe ProductCardGenerator (identica a prima)
 class ProductCardGenerator:
-    def filter_relevant_search_results(generator, ean: str, urls: List[str], product_data: Dict, column_mapping: Dict) -> List[str]:
-        """
-        Filtra i risultati di ricerca EAN escludendo quelli semanticamente non pertinenti.
-        Usa l'AI per determinare la rilevanza in base ai dati del prodotto.
-        """
-        if not urls or len(urls) <= 1:
-            return urls  # Se c'è solo 1 risultato o nessuno, non filtrare
-        
-        # Costruisci contesto prodotto dalle colonne mappate
-        product_context = []
-        for csv_col, var_name in column_mapping.items():
-            value = product_data.get(csv_col, "")
-            if pd.notna(value) and str(value).strip():
-                product_context.append(f"{var_name}: {value}")
-        
-        product_context_str = "\n".join(product_context) if product_context else "Informazioni prodotto non disponibili"
-        
-        # Scrape rapido dei titoli delle pagine
-        page_titles = []
-        for url in urls[:10]:  # Max 10 URL per evitare timeout
-            try:
-                response = requests.get(url, timeout=5, headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                })
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.content, 'html.parser')
-                    title = soup.title.get_text(strip=True) if soup.title else "Titolo non disponibile"
-                    
-                    # Estrai anche H1 e meta description per più contesto
-                    h1 = soup.find('h1')
-                    h1_text = h1.get_text(strip=True) if h1 else ""
-                    
-                    meta_desc = soup.find('meta', attrs={'name': 'description'})
-                    meta_text = meta_desc.get('content') if meta_desc and meta_desc.get('content') else ""
-                    
-                    page_info = f"URL: {url}\nTitolo: {title}\nH1: {h1_text}\nDescrizione: {meta_text}"
-                    page_titles.append(page_info)
-                else:
-                    page_titles.append(f"URL: {url}\nTitolo: [Errore caricamento]")
-            except:
-                page_titles.append(f"URL: {url}\nTitolo: [Errore caricamento]")
-            
-            time.sleep(0.3)  # Rate limiting
-        
-        # Prompt per AI: valuta rilevanza
-        prompt = f"""Sei un esperto analista di e-commerce. Il tuo compito è valutare quali risultati di ricerca sono PERTINENTI al prodotto target.
-    
-    **PRODOTTO TARGET (EAN: {ean}):**
-    {product_context_str}
-    
-    **RISULTATI RICERCA GOOGLE:**
-    {chr(10).join([f"{i+1}. {page}" for i, page in enumerate(page_titles)])}
-    
-    **COMPITO:**
-    Analizza ogni risultato e determina se è PERTINENTE al prodotto target. 
-    Un risultato è pertinente se descrive lo STESSO prodotto o un prodotto MOLTO simile nella stessa categoria.
-    Un risultato NON è pertinente se descrive un prodotto completamente diverso (altra categoria, altro uso, ecc.)
-    
-    **IMPORTANTE:**
-    - Sii RIGOROSO: anche se l'EAN è presente, se il prodotto descritto è diverso, marcalo come NON pertinente
-    - Ignora risultati su marketplace generici che potrebbero avere EAN sbagliati
-    - Considera pertinenti solo prodotti della stessa categoria merceologica
-    
-    Rispondi SOLO con un JSON nel formato:
-    {{
-        "relevant_indices": [1, 2, ...],
-        "reasoning": {{
-            "1": "Breve spiegazione perché pertinente o meno",
-            "2": "Breve spiegazione perché pertinente o meno",
-            ...
-        }}
-    }}
-    
-    Includi in "relevant_indices" SOLO gli indici (1-based) dei risultati PERTINENTI.
-    """
-    
-        try:
-            # Chiama AI per valutazione
-            if generator.ai_provider == "OpenAI":
-                response = generator.openai_client.chat.completions.create(
-                    model=generator.model,
-                    messages=[
-                        {"role": "system", "content": "Sei un esperto analista di e-commerce. Rispondi sempre in formato JSON valido."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=1000,
-                    temperature=0.3  # Bassa temperatura per risposte più deterministiche
-                )
-                content = response.choices[0].message.content.strip()
-            
-            elif generator.ai_provider == "Claude":
-                response = generator.anthropic_client.messages.create(
-                    model=generator.model,
-                    max_tokens=1000,
-                    temperature=0.3,
-                    system="Sei un esperto analista di e-commerce. Rispondi sempre in formato JSON valido.",
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                content = response.content[0].text.strip()
-            else:
-                return urls  # Fallback: restituisci tutti gli URL
-            
-            # Parse risposta JSON
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
-                relevant_indices = result.get('relevant_indices', [])
-                reasoning = result.get('reasoning', {})
-                
-                # Filtra URL pertinenti (converti da 1-based a 0-based)
-                filtered_urls = [urls[i-1] for i in relevant_indices if 0 < i <= len(urls)]
-                
-                # Log del filtro
-                excluded_count = len(urls) - len(filtered_urls)
-                if excluded_count > 0:
-                    st.warning(f"🔍 **Filtro Semantico EAN {ean}:** Esclusi {excluded_count} risultati non pertinenti")
-                    
-                    with st.expander(f"📋 Dettagli Filtro EAN {ean}", expanded=False):
-                        for i, url in enumerate(urls, 1):
-                            if i in relevant_indices:
-                                st.success(f"✅ **Risultato {i}** - PERTINENTE")
-                                st.caption(f"URL: {url}")
-                                if str(i) in reasoning:
-                                    st.caption(f"Motivo: {reasoning[str(i)]}")
-                            else:
-                                st.error(f"❌ **Risultato {i}** - ESCLUSO")
-                                st.caption(f"URL: {url}")
-                                if str(i) in reasoning:
-                                    st.caption(f"Motivo: {reasoning[str(i)]}")
-                            st.markdown("---")
-                else:
-                    st.success(f"✅ **Filtro Semantico EAN {ean}:** Tutti i risultati sono pertinenti")
-                
-                return filtered_urls if filtered_urls else urls[:1]  # Mantieni almeno 1 URL
-            else:
-                return urls  # Fallback: JSON parsing fallito
-        
-        except Exception as e:
-            st.warning(f"⚠️ Errore filtro semantico per EAN {ean}: {e}")
-            return urls  # Fallback: restituisci tutti gli URL
-    
-    def deduplicate_products(csv_data: pd.DataFrame, code_column: str) -> Tuple[pd.DataFrame, Dict]:
-        """
-        Deduplica i prodotti in base al codice prodotto.
-        Restituisce:
-        - DataFrame con prodotti unici da elaborare
-        - Dizionario di mappatura {indice_originale: codice_prodotto}
-        """
-        if not code_column or code_column not in csv_data.columns:
-            return csv_data, {}
-        
-        # Normalizza i codici prodotto
-        csv_data['_normalized_code'] = csv_data[code_column].apply(
-            lambda x: str(x).strip().strip("'").strip('"')
-        )
-        
-        # Trova prodotti unici (prima occorrenza di ogni codice)
-        unique_products = csv_data.drop_duplicates(subset='_normalized_code', keep='first')
-        
-        # Crea mappatura: indice_originale -> codice_prodotto
-        code_mapping = {}
-        for idx, row in csv_data.iterrows():
-            code_mapping[idx] = row['_normalized_code']
-        
-        # Statistiche deduplicazione
-        total_products = len(csv_data)
-        unique_count = len(unique_products)
-        duplicates = total_products - unique_count
-        
-        if duplicates > 0:
-            st.info(f"""
-            🔄 **Deduplicazione Intelligente Attivata**
-            - Prodotti totali nel CSV: **{total_products}**
-            - Prodotti unici da elaborare: **{unique_count}**
-            - Duplicati rilevati: **{duplicates}** (verranno riutilizzati i contenuti)
-            - Risparmio stimato: **~{(duplicates / total_products * 100):.1f}%** di risorse AI
-            """)
-        
-        return unique_products.drop(columns=['_normalized_code']), code_mapping
-
-def expand_results_to_original(results: List[Dict], code_mapping: Dict, 
-                               csv_data: pd.DataFrame, code_column: str) -> List[Dict]:
-    """
-    Espande i risultati per coprire tutte le righe originali del CSV,
-    duplicando i contenuti generati per prodotti con stesso SKU.
-    """
-    # Crea dizionario: codice_prodotto -> risultato generato
-    results_by_code = {}
-    for result in results:
-        code = result.get('codice_prodotto', '')
-        results_by_code[code] = result
-    
-    # Espandi i risultati per tutte le righe originali
-    expanded_results = []
-    
-    for idx in csv_data.index:
-        original_code = str(csv_data.loc[idx, code_column]).strip().strip("'").strip('"')
-        
-        if original_code in results_by_code:
-            # Copia il risultato generato
-            expanded_result = results_by_code[original_code].copy()
-            
-            # Aggiungi eventuali dati specifici della riga (come taglia, colore, ecc.)
-            # Questo permette di mantenere le varianti nel CSV finale
-            for col in csv_data.columns:
-                if col not in expanded_result and col != code_column:
-                    expanded_result[f'original_{col}'] = csv_data.loc[idx, col]
-            
-            expanded_results.append(expanded_result)
-        else:
-            # Prodotto non generato (errore)
-            expanded_results.append({
-                'codice_prodotto': original_code,
-                'errore': 'ERRORE - NON GENERATO'
-            })
-    
-    return expanded_results
     def __init__(self):
         self.openai_client = None
         self.anthropic_client = None
@@ -789,6 +568,8 @@ def expand_results_to_original(results: List[Dict], code_mapping: Dict,
                 st.session_state.product_images_dict = images_dict
                 
                 total_images = sum(len(imgs) for imgs in images_dict.values())
+                
+                st.success(f"✅ Caricate {total_images} immagini per {len(images_dict)} prodotti")
                 
                 return images_dict
                 
@@ -1121,96 +902,93 @@ Rispondi in italiano."""
         except Exception as e:
             return ""
     
-        def get_ean_context(self, ean: str, product_code: str = None, product_data: Dict = None, column_mapping: Dict = None) -> str:
-            """Ottieni contesto da EAN con filtro semantico"""
-            ean_log = {
-                'timestamp': datetime.now().isoformat(),
-                'ean': ean,
-                'product_code': product_code or 'N/A',
-                'search_results': [],
-                'filtered_results': [],
-                'excluded_results': [],
-                'scraped_data': [],
-                'total_characters': 0,
-                'successful_scrapes': 0,
-                'failed_scrapes': 0
+    def get_ean_context(self, ean: str, product_code: str = None, product_data: Dict = None, 
+                        column_mapping: Dict = None) -> str:
+        """Ottieni contesto da EAN con filtro semantico"""
+        ean_log = {
+            'timestamp': datetime.now().isoformat(),
+            'ean': ean,
+            'product_code': product_code or 'N/A',
+            'search_results': [],
+            'filtered_results': [],
+            'excluded_results': [],
+            'scraped_data': [],
+            'total_characters': 0,
+            'successful_scrapes': 0,
+            'failed_scrapes': 0
+        }
+        
+        urls = self.search_ean_on_google(ean)
+        
+        if not urls:
+            ean_log['status'] = 'no_results'
+            st.session_state.ean_logs.append(ean_log)
+            return ""
+        
+        st.info(f"🔍 Trovati {len(urls)} risultati per EAN: {ean}")
+        ean_log['search_results'] = urls
+        
+        # FILTRO SEMANTICO
+        if product_data and column_mapping:
+            with st.spinner(f"🧠 Analisi semantica risultati per EAN {ean}..."):
+                filtered_urls = filter_relevant_search_results(
+                    self, ean, urls, product_data, column_mapping
+                )
+                
+                ean_log['filtered_results'] = filtered_urls
+                ean_log['excluded_results'] = [url for url in urls if url not in filtered_urls]
+                
+                urls = filtered_urls
+        
+        if not urls:
+            st.error(f"❌ Tutti i risultati sono stati esclusi come non pertinenti per EAN: {ean}")
+            ean_log['status'] = 'all_filtered'
+            st.session_state.ean_logs.append(ean_log)
+            return ""
+        
+        st.success(f"✅ Procedo con {len(urls)} risultati pertinenti")
+        
+        contexts = []
+        
+        for i, url in enumerate(urls):
+            content = ""
+            for attempt in range(2):
+                content = self.scrape_product_page(url)
+                if content:
+                    break
+                elif attempt == 0:
+                    time.sleep(2)
+            
+            scrape_log = {
+                'url': url,
+                'position': i + 1,
+                'characters_extracted': len(content),
+                'success': bool(content)
             }
             
-            # Cerca su Google
-            urls = self.search_ean_on_google(ean)
-            
-            if not urls:
-                st.warning(f"⚠️ Nessun risultato trovato per EAN: {ean}")
-                ean_log['status'] = 'no_results'
-                st.session_state.ean_logs.append(ean_log)
-                return ""
-            
-            st.info(f"🔍 Trovati {len(urls)} risultati per EAN: {ean}")
-            ean_log['search_results'] = urls
-            
-            # ✅ FILTRO SEMANTICO: Valuta pertinenza risultati
-            if product_data and column_mapping:
-                with st.spinner(f"🧠 Analisi semantica risultati per EAN {ean}..."):
-                    filtered_urls = filter_relevant_search_results(
-                        self, ean, urls, product_data, column_mapping
-                    )
-                    
-                    ean_log['filtered_results'] = filtered_urls
-                    ean_log['excluded_results'] = [url for url in urls if url not in filtered_urls]
-                    
-                    urls = filtered_urls
-            
-            if not urls:
-                st.error(f"❌ Tutti i risultati sono stati esclusi come non pertinenti per EAN: {ean}")
-                ean_log['status'] = 'all_filtered'
-                st.session_state.ean_logs.append(ean_log)
-                return ""
-            
-            st.success(f"✅ Procedo con {len(urls)} risultati pertinenti")
-            
-            # Scrape contenuto
-            contexts = []
-            
-            for i, url in enumerate(urls):
-                content = ""
-                for attempt in range(2):
-                    content = self.scrape_product_page(url)
-                    if content:
-                        break
-                    elif attempt == 0:
-                        time.sleep(2)
-                
-                scrape_log = {
-                    'url': url,
-                    'position': i + 1,
-                    'characters_extracted': len(content),
-                    'success': bool(content)
-                }
-                
-                if content:
-                    contexts.append(content)
-                    ean_log['successful_scrapes'] += 1
-                    scrape_log['preview'] = content[:200]
-                else:
-                    ean_log['failed_scrapes'] += 1
-                    scrape_log['preview'] = None
-                
-                ean_log['scraped_data'].append(scrape_log)
-                time.sleep(0.5)
-            
-            combined_context = "\n\n".join(contexts)
-            ean_log['total_characters'] = len(combined_context)
-            
-            if combined_context:
-                ean_log['status'] = 'success'
-                st.success(f"✅ Estratti {len(contexts)} contenuti pertinenti ({len(combined_context)} caratteri)")
+            if content:
+                contexts.append(content)
+                ean_log['successful_scrapes'] += 1
+                scrape_log['preview'] = content[:200]
             else:
-                ean_log['status'] = 'failed'
-                st.warning(f"⚠️ Nessun contenuto estratto per EAN: {ean}")
+                ean_log['failed_scrapes'] += 1
+                scrape_log['preview'] = None
             
-            st.session_state.ean_logs.append(ean_log)
-            
-            return combined_context
+            ean_log['scraped_data'].append(scrape_log)
+            time.sleep(0.5)
+        
+        combined_context = "\n\n".join(contexts)
+        ean_log['total_characters'] = len(combined_context)
+        
+        if combined_context:
+            ean_log['status'] = 'success'
+            st.success(f"✅ Estratti {len(contexts)} contenuti pertinenti ({len(combined_context)} caratteri)")
+        else:
+            ean_log['status'] = 'failed'
+        
+        st.session_state.ean_logs.append(ean_log)
+        
+        return combined_context
     
     def create_prompt(self, product_data: Dict, site_info: Dict, column_mapping: Dict, 
                      additional_instructions: str, fields_to_generate: List[str], 
@@ -1333,64 +1111,256 @@ Importante: Rispondi SOLO con il JSON, senza testo aggiuntivo."""
         except Exception as e:
             return None
     
-        def generate_product_content(self, product_data: Dict, site_info: Dict, 
+    def generate_product_content(self, product_data: Dict, site_info: Dict, 
                                 column_mapping: Dict, additional_instructions: str,
                                 fields_to_generate: List[str], ean_column: str = None,
                                 product_code: str = None, use_image_analysis: bool = False) -> Optional[Dict]:
-            """Genera contenuti prodotto con filtro semantico EAN"""
-            max_retries = 3
-            retry_delay = 1
-            
-            image_analysis = ""
-            if use_image_analysis and product_code:
-                image_data, image_analysis = self.analyze_product_image(product_code)
-            
-            # ✅ Passa product_data e column_mapping per filtro semantico
-            ean_context = ""
-            if ean_column and ean_column in product_data:
-                ean = str(product_data[ean_column])
-                if ean and ean.strip() and ean != 'nan':
-                    ean_context = self.get_ean_context(ean, product_code, product_data, column_mapping)
-            
-            for attempt in range(max_retries):
+        """Genera contenuti prodotto con filtro semantico EAN"""
+        max_retries = 3
+        retry_delay = 1
+        
+        image_analysis = ""
+        if use_image_analysis and product_code:
+            image_data, image_analysis = self.analyze_product_image(product_code)
+        
+        ean_context = ""
+        if ean_column and ean_column in product_data:
+            ean = str(product_data[ean_column])
+            if ean and ean.strip() and ean != 'nan':
+                ean_context = self.get_ean_context(ean, product_code, product_data, column_mapping)
+        
+        for attempt in range(max_retries):
+            try:
+                prompt = self.create_prompt(product_data, site_info, column_mapping, 
+                                          additional_instructions, fields_to_generate, 
+                                          ean_context, image_analysis)
+                
+                if self.ai_provider == "OpenAI":
+                    content = self.generate_with_openai(prompt)
+                elif self.ai_provider == "Claude":
+                    content = self.generate_with_claude(prompt)
+                else:
+                    return None
+                
+                if not content:
+                    continue
+                
                 try:
-                    prompt = self.create_prompt(product_data, site_info, column_mapping, 
-                                              additional_instructions, fields_to_generate, 
-                                              ean_context, image_analysis)
-                    
-                    if self.ai_provider == "OpenAI":
-                        content = self.generate_with_openai(prompt)
-                    elif self.ai_provider == "Claude":
-                        content = self.generate_with_claude(prompt)
-                    else:
-                        return None
-                    
-                    if not content:
-                        continue
-                    
-                    try:
-                        result = json.loads(content)
+                    result = json.loads(content)
+                    return result
+                except json.JSONDecodeError:
+                    json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                    if json_match:
+                        result = json.loads(json_match.group())
                         return result
-                    except json.JSONDecodeError:
-                        json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                        if json_match:
-                            result = json.loads(json_match.group())
-                            return result
-                        else:
-                            if attempt == max_retries - 1:
-                                return None
-                            continue
-                            
-                except Exception as e:
-                    if attempt == max_retries - 1:
-                        return None
                     else:
-                        time.sleep(retry_delay * (attempt + 1))
+                        if attempt == max_retries - 1:
+                            return None
                         continue
-            
-            return None
+                        
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    return None
+                else:
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+        
+        return None
 
-# Inizializzazione Session State
+# FUNZIONE FILTRO SEMANTICO
+def filter_relevant_search_results(generator, ean: str, urls: List[str], 
+                                   product_data: Dict, column_mapping: Dict) -> List[str]:
+    """Filtra i risultati di ricerca EAN escludendo quelli semanticamente non pertinenti"""
+    if not urls or len(urls) <= 1:
+        return urls
+    
+    product_context = []
+    for csv_col, var_name in column_mapping.items():
+        value = product_data.get(csv_col, "")
+        if pd.notna(value) and str(value).strip():
+            product_context.append(f"{var_name}: {value}")
+    
+    product_context_str = "\n".join(product_context) if product_context else "Informazioni prodotto non disponibili"
+    
+    page_titles = []
+    for url in urls[:10]:
+        try:
+            response = requests.get(url, timeout=5, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.content, 'html.parser')
+                title = soup.title.get_text(strip=True) if soup.title else "Titolo non disponibile"
+                
+                h1 = soup.find('h1')
+                h1_text = h1.get_text(strip=True) if h1 else ""
+                
+                meta_desc = soup.find('meta', attrs={'name': 'description'})
+                meta_text = meta_desc.get('content') if meta_desc and meta_desc.get('content') else ""
+                
+                page_info = f"URL: {url}\nTitolo: {title}\nH1: {h1_text}\nDescrizione: {meta_text}"
+                page_titles.append(page_info)
+            else:
+                page_titles.append(f"URL: {url}\nTitolo: [Errore caricamento]")
+        except:
+            page_titles.append(f"URL: {url}\nTitolo: [Errore caricamento]")
+        
+        time.sleep(0.3)
+    
+    prompt = f"""Sei un esperto analista di e-commerce. Il tuo compito è valutare quali risultati di ricerca sono PERTINENTI al prodotto target.
+
+**PRODOTTO TARGET (EAN: {ean}):**
+{product_context_str}
+
+**RISULTATI RICERCA GOOGLE:**
+{chr(10).join([f"{i+1}. {page}" for i, page in enumerate(page_titles)])}
+
+**COMPITO:**
+Analizza ogni risultato e determina se è PERTINENTE al prodotto target. 
+Un risultato è pertinente se descrive lo STESSO prodotto o un prodotto MOLTO simile nella stessa categoria.
+Un risultato NON è pertinente se descrive un prodotto completamente diverso (altra categoria, altro uso, ecc.)
+
+**IMPORTANTE:**
+- Sii RIGOROSO: anche se l'EAN è presente, se il prodotto descritto è diverso, marcalo come NON pertinente
+- Ignora risultati su marketplace generici che potrebbero avere EAN sbagliati
+- Considera pertinenti solo prodotti della stessa categoria merceologica
+
+Rispondi SOLO con un JSON nel formato:
+{{
+    "relevant_indices": [1, 2, ...],
+    "reasoning": {{
+        "1": "Breve spiegazione perché pertinente o meno",
+        "2": "Breve spiegazione perché pertinente o meno",
+        ...
+    }}
+}}
+
+Includi in "relevant_indices" SOLO gli indici (1-based) dei risultati PERTINENTI.
+"""
+
+    try:
+        if generator.ai_provider == "OpenAI":
+            response = generator.openai_client.chat.completions.create(
+                model=generator.model,
+                messages=[
+                    {"role": "system", "content": "Sei un esperto analista di e-commerce. Rispondi sempre in formato JSON valido."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1000,
+                temperature=0.3
+            )
+            content = response.choices[0].message.content.strip()
+        
+        elif generator.ai_provider == "Claude":
+            response = generator.anthropic_client.messages.create(
+                model=generator.model,
+                max_tokens=1000,
+                temperature=0.3,
+                system="Sei un esperto analista di e-commerce. Rispondi sempre in formato JSON valido.",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            content = response.content[0].text.strip()
+        else:
+            return urls
+        
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+            relevant_indices = result.get('relevant_indices', [])
+            reasoning = result.get('reasoning', {})
+            
+            filtered_urls = [urls[i-1] for i in relevant_indices if 0 < i <= len(urls)]
+            
+            excluded_count = len(urls) - len(filtered_urls)
+            if excluded_count > 0:
+                st.warning(f"🔍 **Filtro Semantico EAN {ean}:** Esclusi {excluded_count} risultati non pertinenti")
+                
+                with st.expander(f"📋 Dettagli Filtro EAN {ean}", expanded=False):
+                    for i, url in enumerate(urls, 1):
+                        if i in relevant_indices:
+                            st.success(f"✅ **Risultato {i}** - PERTINENTE")
+                            st.caption(f"URL: {url}")
+                            if str(i) in reasoning:
+                                st.caption(f"Motivo: {reasoning[str(i)]}")
+                        else:
+                            st.error(f"❌ **Risultato {i}** - ESCLUSO")
+                            st.caption(f"URL: {url}")
+                            if str(i) in reasoning:
+                                st.caption(f"Motivo: {reasoning[str(i)]}")
+                        st.markdown("---")
+            else:
+                st.success(f"✅ **Filtro Semantico EAN {ean}:** Tutti i risultati sono pertinenti")
+            
+            return filtered_urls if filtered_urls else urls[:1]
+        else:
+            return urls
+    
+    except Exception as e:
+        st.warning(f"⚠️ Errore filtro semantico per EAN {ean}: {e}")
+        return urls
+
+# FUNZIONI DEDUPLICAZIONE
+def deduplicate_products(csv_data: pd.DataFrame, code_column: str) -> Tuple[pd.DataFrame, Dict]:
+    """Deduplica i prodotti in base al codice prodotto"""
+    if not code_column or code_column not in csv_data.columns:
+        return csv_data, {}
+    
+    csv_data['_normalized_code'] = csv_data[code_column].apply(
+        lambda x: str(x).strip().strip("'").strip('"')
+    )
+    
+    unique_products = csv_data.drop_duplicates(subset='_normalized_code', keep='first')
+    
+    code_mapping = {}
+    for idx, row in csv_data.iterrows():
+        code_mapping[idx] = row['_normalized_code']
+    
+    total_products = len(csv_data)
+    unique_count = len(unique_products)
+    duplicates = total_products - unique_count
+    
+    if duplicates > 0:
+        st.info(f"""
+        🔄 **Deduplicazione Intelligente Attivata**
+        - Prodotti totali nel CSV: **{total_products}**
+        - Prodotti unici da elaborare: **{unique_count}**
+        - Duplicati rilevati: **{duplicates}** (verranno riutilizzati i contenuti)
+        - Risparmio stimato: **~{(duplicates / total_products * 100):.1f}%** di risorse AI
+        """)
+    
+    return unique_products.drop(columns=['_normalized_code']), code_mapping
+
+def expand_results_to_original(results: List[Dict], code_mapping: Dict, 
+                               csv_data: pd.DataFrame, code_column: str) -> List[Dict]:
+    """Espande i risultati per coprire tutte le righe originali del CSV"""
+    results_by_code = {}
+    for result in results:
+        code = result.get('codice_prodotto', '')
+        results_by_code[code] = result
+    
+    expanded_results = []
+    
+    for idx in csv_data.index:
+        original_code = str(csv_data.loc[idx, code_column]).strip().strip("'").strip('"')
+        
+        if original_code in results_by_code:
+            expanded_result = results_by_code[original_code].copy()
+            
+            for col in csv_data.columns:
+                if col not in expanded_result and col != code_column:
+                    expanded_result[f'original_{col}'] = csv_data.loc[idx, col]
+            
+            expanded_results.append(expanded_result)
+        else:
+            expanded_results.append({
+                'codice_prodotto': original_code,
+                'errore': 'ERRORE - NON GENERATO'
+            })
+    
+    return expanded_results
+
 def initialize_session_state():
     """Inizializza session state"""
     if 'current_step' not in st.session_state:
@@ -1433,7 +1403,6 @@ def initialize_session_state():
         st.session_state.generator = ProductCardGenerator()
     if 'preview_index' not in st.session_state:
         st.session_state.preview_index = 0
-    # NUOVI per deduplicazione
     if 'unique_products' not in st.session_state:
         st.session_state.unique_products = None
     if 'code_mapping' not in st.session_state:
@@ -1455,7 +1424,6 @@ def process_batch(generator, batch_data, site_info, column_mapping, additional_i
         else:
             product_code = f"PROD_{current_index+1}"
         
-        # ✅ Passa product_data e column_mapping per il filtro semantico
         generated_content = generator.generate_product_content(
             row.to_dict(), site_info, column_mapping, additional_instructions,
             fields_to_generate, ean_column, product_code, use_image_analysis
@@ -1499,7 +1467,6 @@ def render_product_preview():
     
     st.markdown('<div class="product-preview">', unsafe_allow_html=True)
     
-    # Navigazione
     col1, col2, col3 = st.columns([1, 8, 1])
     
     with col1:
@@ -1515,31 +1482,25 @@ def render_product_preview():
             st.session_state.preview_index = min(len(st.session_state.results) - 1, st.session_state.preview_index + 1)
             st.rerun()
     
-    # Dati prodotto
     product = st.session_state.results[st.session_state.preview_index]
     
-    # Titolo
     if 'titolo' in product:
         st.markdown(f'<h2 class="product-title-preview">{product["titolo"]}</h2>', unsafe_allow_html=True)
     
-    # Codice
     st.markdown(f'<p style="text-align: center; color: #8A8A8A; font-size: 0.9rem; margin-bottom: 2rem;">Codice: <strong>{product["codice_prodotto"]}</strong></p>', unsafe_allow_html=True)
     
-    # Short Description
     if 'short_description' in product and product['short_description']:
         st.markdown('<div class="product-meta">', unsafe_allow_html=True)
         st.markdown('<p class="product-field-label">📝 Short Description</p>', unsafe_allow_html=True)
         st.markdown(f'<p class="product-field-content">{product["short_description"]}</p>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # Description
     if 'description' in product and product['description']:
         st.markdown('<div class="product-meta">', unsafe_allow_html=True)
         st.markdown('<p class="product-field-label">📄 Description</p>', unsafe_allow_html=True)
         st.markdown(f'<p class="product-field-content">{product["description"]}</p>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # Bullet Points
     if 'bullet_points' in product and product['bullet_points']:
         st.markdown('<div class="product-meta">', unsafe_allow_html=True)
         st.markdown('<p class="product-field-label">🎯 Bullet Points</p>', unsafe_allow_html=True)
@@ -1548,21 +1509,18 @@ def render_product_preview():
             st.markdown(f'<p class="product-field-content">• {bullet}</p>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # Meta Title
     if 'meta_title' in product and product['meta_title']:
         st.markdown('<div class="product-meta">', unsafe_allow_html=True)
         st.markdown('<p class="product-field-label">🔍 Meta Title SEO</p>', unsafe_allow_html=True)
         st.markdown(f'<p class="product-field-content">{product["meta_title"]}</p>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # Meta Description
     if 'meta_description' in product and product['meta_description']:
         st.markdown('<div class="product-meta">', unsafe_allow_html=True)
         st.markdown('<p class="product-field-label">🔍 Meta Description SEO</p>', unsafe_allow_html=True)
         st.markdown(f'<p class="product-field-content">{product["meta_description"]}</p>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # URL Slug
     if 'url_slug' in product and product['url_slug']:
         st.markdown('<div class="product-meta">', unsafe_allow_html=True)
         st.markdown('<p class="product-field-label">🔗 URL Slug</p>', unsafe_allow_html=True)
@@ -1574,7 +1532,6 @@ def render_product_preview():
 def main():
     initialize_session_state()
     
-    # Header
     st.markdown("""
     <div class="main-header">
         <h1>🔴 Moca - Generatore Schede Prodotto</h1>
@@ -1584,7 +1541,6 @@ def main():
     
     generator = st.session_state.generator
     
-    # Progress Indicator
     steps = ["Configurazione AI", "Caricamento Dati", "Mappatura Colonne", "Opzioni Avanzate", "Generazione", "Risultati"]
     
     progress_pct = (st.session_state.current_step / len(steps))
@@ -1654,7 +1610,6 @@ def main():
         
         st.markdown("</div>", unsafe_allow_html=True)
         
-        # Bottone avanti
         if api_key:
             if st.button("➡️ Avanti: Caricamento Dati", type="primary", use_container_width=True):
                 with st.spinner("Configurazione AI in corso..."):
@@ -1803,7 +1758,6 @@ def main():
         </div>
         ''', unsafe_allow_html=True)
         
-        # Informazioni Sito
         st.subheader("🌐 Informazioni Sito")
         col1, col2 = st.columns(2)
         
@@ -1834,7 +1788,6 @@ def main():
         
         st.markdown("---")
         
-        # Campi da Generare
         st.subheader("📝 Campi da Generare")
         
         all_fields = [
@@ -1857,7 +1810,6 @@ def main():
         
         st.markdown("---")
         
-        # Analisi Immagini
         st.subheader("🖼️ Analisi Immagini (Opzionale)")
         
         use_images = st.checkbox(
@@ -1880,12 +1832,9 @@ def main():
                     if images_dict:
                         st.session_state.images_loaded = True
                         generator.product_images = images_dict
-                        st.success(f"✅ Caricate {sum(len(imgs) for imgs in images_dict.values())} immagini per {len(images_dict)} prodotti")
             
-            # Pre-analisi immagini
             if st.session_state.images_loaded and not st.session_state.images_analyzed:
                 if st.button("🚀 Avvia Pre-Analisi Immagini", type="secondary"):
-                    # Trova codice prodotto
                     code_column = None
                     for csv_col, var_name in st.session_state.column_mapping.items():
                         if any(keyword in var_name.lower() for keyword in ['codice', 'code', 'id', 'sku']):
@@ -1907,7 +1856,6 @@ def main():
         
         st.markdown("---")
         
-        # Configurazione Batch
         st.subheader("⚙️ Impostazioni Elaborazione")
         
         col1, col2 = st.columns(2)
@@ -1942,7 +1890,6 @@ def main():
                 st.warning("⚠️ Compila tutti i campi obbligatori")
     
     # STEP 5: Generazione
-# STEP 5: Generazione
     elif st.session_state.current_step == 5:
         st.markdown('<div class="step-container">', unsafe_allow_html=True)
         st.markdown('''
@@ -1955,7 +1902,6 @@ def main():
         if st.session_state.processing_status == 'idle':
             st.markdown("### 🎯 Pronto per generare le schede prodotto!")
             
-            # DEDUPLICAZIONE: Trova prodotti unici
             code_column = None
             for csv_col, var_name in st.session_state.column_mapping.items():
                 if any(keyword in var_name.lower() for keyword in ['codice', 'code', 'id', 'sku']):
@@ -1971,7 +1917,6 @@ def main():
                 st.session_state.unique_products = st.session_state.csv_data
                 st.session_state.code_mapping = {}
             
-            # Riepilogo configurazione
             st.markdown('<div class="info-card">', unsafe_allow_html=True)
             st.markdown(f"""
             **📊 Riepilogo Configurazione:**
@@ -2003,7 +1948,6 @@ def main():
         elif st.session_state.processing_status == 'processing':
             st.markdown("### ⚡ Elaborazione in corso...")
             
-            # Progress metrics
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
@@ -2027,14 +1971,12 @@ def main():
             
             st.progress(st.session_state.current_index / st.session_state.total_products if st.session_state.total_products > 0 else 0)
             
-            # Trova colonna codice
             code_column = None
             for csv_col, var_name in st.session_state.column_mapping.items():
                 if any(keyword in var_name.lower() for keyword in ['codice', 'code', 'id']):
                     code_column = csv_col
                     break
             
-            # Elabora batch SUI PRODOTTI UNICI
             start_idx = st.session_state.current_index
             end_idx = min(start_idx + st.session_state.batch_size, len(st.session_state.unique_products))
             
@@ -2058,7 +2000,6 @@ def main():
                     time.sleep(st.session_state.delay_between_batches)
                     st.rerun()
                 else:
-                    # ESPANSIONE: Duplica i risultati per tutte le righe originali
                     st.markdown("### 🔄 Espansione risultati a tutte le righe...")
                     
                     if st.session_state.code_mapping:
@@ -2090,7 +2031,6 @@ def main():
         
         st.success(f"🎉 Elaborazione completata! **{len(st.session_state.results)}** schede prodotto generate.")
         
-        # Statistiche
         st.subheader("📊 Statistiche Generazione")
         
         col1, col2, col3, col4 = st.columns(4)
@@ -2127,13 +2067,11 @@ def main():
         
         st.markdown("---")
         
-        # Anteprima Schede Prodotto
         st.subheader("👀 Anteprima Schede Prodotto")
         render_product_preview()
         
         st.markdown("---")
         
-        # Download
         st.subheader("📥 Download Risultati")
         
         df_results = pd.DataFrame(st.session_state.results)
@@ -2166,24 +2104,20 @@ def main():
         
         with col3:
             if st.button("🔄 Nuova Elaborazione", use_container_width=True):
-                # Reset completo
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 st.rerun()
         
         st.markdown("---")
         
-        # Tabella completa risultati
         with st.expander("📋 Visualizza Tabella Completa", expanded=False):
             st.dataframe(df_results, use_container_width=True)
         
-        # Statistiche EAN se disponibili
         if st.session_state.ean_logs:
             with st.expander("🔍 Statistiche Ricerca EAN", expanded=False):
                 total_ean = len(st.session_state.ean_logs)
                 successful = len([log for log in st.session_state.ean_logs if log.get('status') == 'success'])
                 failed = len([log for log in st.session_state.ean_logs if log.get('status') == 'failed'])
-                no_results = len([log for log in st.session_state.ean_logs if log.get('status') == 'no_results'])
                 
                 total_scraped = sum(log.get('successful_scrapes', 0) for log in st.session_state.ean_logs)
                 total_chars = sum(log.get('total_characters', 0) for log in st.session_state.ean_logs)
@@ -2200,7 +2134,6 @@ def main():
         
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # Footer
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; padding: 2rem;'>
